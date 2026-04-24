@@ -1,0 +1,38 @@
+[package]
+name = "cdp-launcher"
+version = "0.1.0"
+description = "CDP Launcher — cluster provisioning desktop app for Cloudera SEs"
+authors = ["Partomia"]
+license = "MIT"
+repository = "https://github.com/partomia/cdp-launcher-app"
+edition = "2021"
+
+[lib]
+name = "cdp_launcher_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "cdp-launcher"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.31", features = ["bundled"] }
+keyring = "2"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

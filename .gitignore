@@ -1,0 +1,40 @@
+# Rust / Tauri
+target/
+src-tauri/target/
+*.rs.bk
+
+# Node / Vite
+node_modules/
+dist/
+.vite/
+
+# macOS
+.DS_Store
+*.DS_Store
+__MACOSX/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Build artifacts
+dist/
+*.dmg
+*.app
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# SQLite
+*.db
+*.sqlite
+*.sqlite3
