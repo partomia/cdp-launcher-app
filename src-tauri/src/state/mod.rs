@@ -1,2 +1,3 @@
-// Application state — SQLite connection pool, active subprocess handles
-// Full implementation in Phase 2
+mod store;
+
+pub use store::{Cluster, ClusterCreateInput, PhaseEvent, Store};
