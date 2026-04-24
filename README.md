@@ -117,16 +117,19 @@ cdp-launcher-app/
     components/
       AppShell.tsx            Sidebar + top bar layout
       Sidebar.tsx             Nav, theme toggle, version
+      PhaseTracker.tsx        Phase status list with polling + elapsed time
+      LogPane.tsx             Virtualised live log viewer (search, copy, save)
       ui/button.tsx           shadcn/ui Button (new-york style)
     lib/
       tauri.ts                Typed wrappers for all Tauri commands
-      types.ts                TypeScript interfaces (Cluster, PhaseEvent, etc.)
+      types.ts                TypeScript interfaces + PHASE_DEFS + DEFAULT_TFVARS
       theme.tsx               ThemeProvider (system / light / dark)
       utils.ts                cn() Tailwind merge helper
     pages/
-      Dashboard.tsx           Cluster list (empty state for now)
-      InstallWizard.tsx       5-step install wizard (coming next)
-      ClusterDetail.tsx       Cluster detail + logs
+      Dashboard.tsx           Cluster list (empty state)
+      InstallWizard.tsx       4-step install wizard (name → infra → passwords → review)
+      InstallProgress.tsx     Live install view (phase tracker + log pane + cancel)
+      ClusterDetail.tsx       Cluster detail — routes to InstallProgress or ReadyView
       Settings.tsx            Settings + smoke tests
 
   src-tauri/                  Rust backend (Tauri 2.x)
@@ -136,7 +139,14 @@ cdp-launcher-app/
       commands/
         aws.rs                AWS CLI wrappers (profiles, identity, key pairs)
         cluster.rs            Cluster CRUD Tauri commands
+        install.rs            install_start / install_cancel / destroy_start / logs_fetch
         keychain.rs           macOS Keychain read/write commands
+      orchestrator/
+        install.rs            11-phase install orchestrator
+        destroy.rs            Destroy orchestrator (make tf-destroy)
+        tfvars.rs             terraform.tfvars writer (reads secrets from Keychain)
+      runner/
+        process.rs            PTY subprocess runner with Tauri log-line events
       state/
         store.rs              SQLite Store with all DB methods
       error.rs                AppError (serializable for Tauri IPC)
@@ -169,9 +179,20 @@ cdp-launcher-app/
 - Cluster CRUD Tauri commands
 - Typed TypeScript client (`src/lib/tauri.ts`)
 
-**Phase 4 — Install wizard** (next)
-- 5-step form with validation, cost estimator, live AWS identity check
-- Zustand wizard store with localStorage persistence
-- Credential handling → Keychain on launch
+**Phase 4 — Orchestration + UI** (complete)
+- PTY subprocess runner with live `log-line` Tauri events (portable-pty)
+- Cancel via SIGTERM; stale running phases auto-interrupted on startup
+- 11-phase install orchestrator: tfvars → TF init/plan/apply → make phases
+- Destroy orchestrator (`make tf-destroy`)
+- `PhaseTracker` component: polls phase events every 2.5 s, status icons, elapsed time
+- `LogPane` component: virtualised scroll, real-time streaming, search, copy, save
+- `InstallProgress` page: phase tracker + log pane + Cancel button
+- `ClusterDetail` routes to `InstallProgress` while installing/destroying/failed
+- 4-step `InstallWizard`: collects cluster config + 6 credentials → Keychain → cluster create → install start
+
+**Phase 5 — Dashboard + Destroy flow** (next)
+- Cluster list on Dashboard with live state badges
+- Destroy button on cluster detail (ready state)
+- Settings page with profile picker and defaults editor
 
 See [DESIGN.md](DESIGN.md) for the full roadmap and architecture details.
