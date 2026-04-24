@@ -4,6 +4,12 @@ use std::sync::Mutex;
 
 use crate::error::AppError;
 
+pub fn app_data_dir() -> Result<std::path::PathBuf, AppError> {
+    dirs::data_dir()
+        .ok_or_else(|| AppError::Other("cannot determine data directory".into()))
+        .map(|d| d.join("com.partomia.cdp-launcher"))
+}
+
 // ---------------------------------------------------------------------------
 // Embedded migrations
 // ---------------------------------------------------------------------------
@@ -49,14 +55,6 @@ pub struct ClusterCreateInput {
     pub aws_profile: String,
     pub aws_region: String,
     pub tfvars_json: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct PhaseEventInsert {
-    pub cluster_id: String,
-    pub phase: String,
-    pub status: String,
-    pub started_at: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -201,24 +199,61 @@ impl Store {
     // Phase event queries
     // -----------------------------------------------------------------------
 
-    pub fn insert_phase_event(&self, ev: &PhaseEventInsert) -> Result<PhaseEvent, AppError> {
+    pub fn update_cluster_destroyed(&self, id: &str, destroyed_at: &str) -> Result<(), AppError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE clusters SET state='destroyed', destroyed_at=?1 WHERE id=?2",
+            params![destroyed_at, id],
+        )?;
+        Ok(())
+    }
+
+    /// Insert a phase_event row with status="running" and return its rowid.
+    pub fn start_phase_event(
+        &self,
+        cluster_id: &str,
+        phase: &str,
+        started_at: &str,
+    ) -> Result<i64, AppError> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT INTO phase_events (cluster_id, phase, status, started_at)
-             VALUES (?1, ?2, ?3, ?4)",
-            params![ev.cluster_id, ev.phase, ev.status, ev.started_at],
+             VALUES (?1, ?2, 'running', ?3)",
+            params![cluster_id, phase, started_at],
         )?;
-        let id = conn.last_insert_rowid();
-        Ok(PhaseEvent {
-            id,
-            cluster_id: ev.cluster_id.clone(),
-            phase: ev.phase.clone(),
-            status: ev.status.clone(),
-            started_at: ev.started_at.clone(),
-            finished_at: None,
-            exit_code: None,
-            error_summary: None,
-        })
+        Ok(conn.last_insert_rowid())
+    }
+
+    /// Update a phase_event row when the subprocess finishes.
+    pub fn finish_phase_event(
+        &self,
+        event_id: i64,
+        status: &str,
+        finished_at: &str,
+        exit_code: i32,
+        error_summary: Option<&str>,
+    ) -> Result<(), AppError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE phase_events
+             SET status=?1, finished_at=?2, exit_code=?3, error_summary=?4
+             WHERE id=?5",
+            params![status, finished_at, exit_code, error_summary, event_id],
+        )?;
+        Ok(())
+    }
+
+    /// On app startup: mark any phase_event with status='running' that
+    /// started more than 5 minutes ago as 'interrupted' (stale from a crash).
+    pub fn mark_stale_phases(&self) -> Result<u64, AppError> {
+        let conn = self.conn.lock().unwrap();
+        let n = conn.execute(
+            "UPDATE phase_events SET status='interrupted', finished_at=datetime('now')
+             WHERE status='running'
+               AND started_at < datetime('now', '-5 minutes')",
+            [],
+        )?;
+        Ok(n as u64)
     }
 
     pub fn list_phase_events_for_cluster(&self, cluster_id: &str) -> Result<Vec<PhaseEvent>, AppError> {
