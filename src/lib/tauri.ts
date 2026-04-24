@@ -80,6 +80,37 @@ export const logsFetch = (
 ): Promise<LogLine[]> => call("logs_fetch", { clusterId, phase, offset, limit });
 
 // ---------------------------------------------------------------------------
+// Settings
+// ---------------------------------------------------------------------------
+
+export const settingsGet = (): Promise<Record<string, string>> => call("settings_get");
+export const settingsSet = (key: string, value: string): Promise<void> =>
+  call("settings_set", { key, value });
+
+// ---------------------------------------------------------------------------
+// Danger zone
+// ---------------------------------------------------------------------------
+
+export const forgetAllSecrets = (): Promise<void> => call("forget_all_secrets");
+export const deleteAllClusters = (): Promise<void> => call("delete_all_clusters");
+
+// ---------------------------------------------------------------------------
+// Cluster UI actions
+// ---------------------------------------------------------------------------
+
+export const clusterEnvVars = (clusterId: string): Promise<string> =>
+  call("cluster_env_vars", { clusterId });
+
+export const openCmUi = (clusterId: string): Promise<void> =>
+  call("open_cm_ui", { clusterId });
+
+export const openSshTerminal = (clusterId: string): Promise<void> =>
+  call("open_ssh_terminal", { clusterId });
+
+export const runRemediation = (clusterId: string, command: string): Promise<void> =>
+  call("run_remediation", { clusterId, command });
+
+// ---------------------------------------------------------------------------
 // Re-exports
 // ---------------------------------------------------------------------------
 

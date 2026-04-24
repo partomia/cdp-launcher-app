@@ -1,0 +1,92 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-dmg:
+    name: Build universal macOS DMG
+    runs-on: macos-latest
+
+    permissions:
+      contents: write   # needed to create GitHub Release assets
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust (universal targets)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Install Tauri CLI
+        run: npm install --save-dev @tauri-apps/cli
+
+      - name: Build universal app bundle
+        run: npx tauri build --target universal-apple-darwin
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install create-dmg
+        run: brew install create-dmg
+
+      - name: Package into DMG
+        run: |
+          APP_PATH=$(find src-tauri/target/universal-apple-darwin/release/bundle/macos -name "*.app" | head -n 1)
+          VERSION="${GITHUB_REF_NAME#v}"
+          DMG_NAME="cdp-launcher-${VERSION}.dmg"
+
+          # Ad-hoc sign the .app (no Developer ID required)
+          codesign --deep --force --sign - "$APP_PATH"
+
+          create-dmg \
+            --volname "CDP Launcher" \
+            --window-pos 200 120 \
+            --window-size 600 400 \
+            --icon-size 100 \
+            --app-drop-link 400 185 \
+            "$DMG_NAME" \
+            "$APP_PATH"
+
+          echo "DMG_PATH=$DMG_NAME" >> $GITHUB_ENV
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Create GitHub Release and upload DMG
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "CDP Launcher ${{ env.VERSION }}"
+          body: |
+            ## CDP Launcher ${{ env.VERSION }}
+
+            ### Installation
+            1. Download `cdp-launcher-${{ env.VERSION }}.dmg`
+            2. Open the DMG and drag **CDP Launcher** to your Applications folder
+            3. **First launch:** right-click → Open to bypass Gatekeeper (ad-hoc signed, not notarized)
+
+            ### What's new
+            See [DESIGN.md](https://github.com/${{ github.repository }}/blob/main/DESIGN.md) for the full feature list.
+
+            ---
+            > **Note:** This build is ad-hoc signed for personal/team use. It is not notarized by Apple.
+            > On first launch, macOS Gatekeeper will show a warning — right-click the app and choose **Open** to proceed.
+          files: ${{ env.DMG_PATH }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

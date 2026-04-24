@@ -6,7 +6,8 @@ import { cn } from "@/lib/utils";
 import { installCancel, clusterGet } from "@/lib/tauri";
 import { PhaseTracker } from "@/components/PhaseTracker";
 import { LogPane } from "@/components/LogPane";
-import type { Cluster } from "@/lib/types";
+import { ErrorHintBanner } from "@/components/ErrorHintBanner";
+import type { Cluster, ErrorHint } from "@/lib/types";
 
 interface Props {
   cluster: Cluster;
@@ -44,6 +45,7 @@ export function InstallProgress({ cluster, onClusterChange }: Props) {
   const [selectedPhase, setSelectedPhase] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [elapsed, setElapsed] = useState(() => elapsedSince(cluster.created_at));
+  const [activeHint, setActiveHint] = useState<ErrorHint | null>(null);
 
   const isActive = cluster.state === "installing" || cluster.state === "destroying";
 
@@ -62,6 +64,11 @@ export function InstallProgress({ cluster, onClusterChange }: Props) {
       }),
       listen("destroy-complete", async () => {
         try { onClusterChange(await clusterGet(cluster.id)); } catch {}
+      }),
+      listen<{ cluster_id: string; hint: ErrorHint }>("error-hint", (event) => {
+        if (event.payload.cluster_id === cluster.id) {
+          setActiveHint(event.payload.hint);
+        }
       }),
     ];
     return () => { subs.forEach((p) => p.then((fn) => fn())); };
@@ -99,6 +106,17 @@ export function InstallProgress({ cluster, onClusterChange }: Props) {
           )}
         </div>
       </div>
+
+      {/* Error hint banner */}
+      {activeHint && (
+        <div className="px-4 py-2 flex-shrink-0">
+          <ErrorHintBanner
+            clusterId={cluster.id}
+            hint={activeHint}
+            onDismiss={() => setActiveHint(null)}
+          />
+        </div>
+      )}
 
       {/* Body: phase tracker + log pane */}
       <div className="flex flex-1 min-h-0">
