@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
 use crate::error::AppError;
+use crate::orchestrator::error_hints;
 
 // ---------------------------------------------------------------------------
 // LogLine — emitted per output line, also persisted to disk
@@ -153,6 +154,19 @@ pub async fn execute_command(
             };
             if let Err(e) = app.emit("log-line", &log_line) {
                 tracing::warn!("emit log-line failed: {e}");
+            }
+
+            // Check for known error patterns and emit an error-hint event
+            if let Some(hint) = error_hints::check_line(&log_line.line) {
+                tracing::warn!("error hint matched: {} ({})", hint.name, hint.summary);
+                let payload = serde_json::json!({
+                    "cluster_id": run.cluster_id,
+                    "phase": run.phase,
+                    "hint": hint,
+                });
+                if let Err(e) = app.emit("error-hint", &payload) {
+                    tracing::warn!("emit error-hint failed: {e}");
+                }
             }
         }
 

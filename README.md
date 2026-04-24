@@ -2,19 +2,15 @@
 
 A macOS desktop app for Cloudera Solutions Engineers to provision and destroy CDP 7.3.2 clusters on AWS — without touching the CLI.
 
-Fill in a wizard, click Install. The app drives the underlying Terraform + Ansible + Make automation and streams live phase-by-phase progress back to the UI.
+Fill in a 4-step wizard, click Launch. The app drives the underlying Terraform + Ansible + Make automation, streams live phase-by-phase logs back to the UI, and detects common errors with remediation hints.
 
 ---
 
 ## What it does
 
-- Guides you through a 5-step wizard to configure an AWS-hosted CDP 7.3.2 cluster
-- Writes `terraform.tfvars` and Ansible inventory files automatically
-- Runs the installer phases in sequence (`inventory → ping → bootstrap → prereq → freeipa → databases → cm → kerberos → post-install`) and streams logs in real time
-- Stores all passwords in the macOS Keychain — nothing sensitive touches disk or SQLite
-- Lets you destroy a cluster with a single button (`make tf-destroy`)
-
-**Who this is for:** Cloudera SEs spinning up proof-of-concept or demo environments for customers.
+- **Provision** — 4-step wizard collects cluster config and credentials, then runs all 11 install phases (Terraform init/plan/apply → Ansible bootstrap → CM install) with live log streaming
+- **Monitor** — phase tracker with status icons, elapsed time, and per-phase log viewer; auto-detects SELinux, AMI, quota, and key-pair errors with remediation hints
+- **Manage** — dashboard lists all clusters with state, cost estimate, and one-click destroy; cluster detail shows CM URL, SSH, env vars, phase history, and Keychain secrets
 
 ---
 
@@ -25,86 +21,106 @@ Fill in a wizard, click Install. The app drives the underlying Terraform + Ansib
 | macOS 13+ | Apple Silicon or Intel |
 | Xcode Command Line Tools | `xcode-select --install` |
 | Rust + Cargo | Installed by `scripts/bootstrap-dev.sh` if missing |
-| Node 18+ | Installed by `scripts/bootstrap-dev.sh` via nvm if missing |
+| Node 20+ | Installed by `scripts/bootstrap-dev.sh` via nvm if missing |
+| Terraform | `brew install terraform` |
+| Ansible | `pip3 install ansible` |
+| GNU Make | Ships with Xcode CLT |
 | AWS CLI | `brew install awscli` |
-| AWS named profile | Configured in `~/.aws/config` with credentials for your target account |
-| CDP installer repo | Cloned at `~/IdeaProjects/CDP7.3.2-Installation/cdp-732-automation` (overridable in Settings) |
-| Cloudera license file | A valid `.license` file on your local machine |
+| AWS named profile | Configured in `~/.aws/config` with EC2/VPC/IAM permissions |
+| CDP installer repo | `cdp-732-automation` cloned locally |
 
 ---
 
-## Getting started
+## Install (released DMG)
+
+1. Download the latest `cdp-launcher-<version>.dmg` from the [Releases](https://github.com/partomia/cdp-launcher-app/releases) page
+2. Open the DMG and drag **CDP Launcher** to your Applications folder
+3. **First launch:** right-click → **Open** to bypass Gatekeeper (ad-hoc signed, not notarized)
+
+---
+
+## Development
 
 ```bash
-# 1. Clone this repo
+# 1. Clone
 git clone git@github.com:partomia/cdp-launcher-app.git
 cd cdp-launcher-app
 
-# 2. Install dependencies (Rust, Node, Tauri CLI)
+# 2. Install Rust, Node, and JS dependencies
 ./scripts/bootstrap-dev.sh
 
-# 3. Launch in dev mode
-make dev
+# 3. Launch in hot-reload dev mode
+source "$HOME/.cargo/env" && cargo tauri dev
 ```
 
-`make dev` starts the Vite dev server and compiles the Rust backend. On first run Cargo downloads ~400 crates — expect 2–3 minutes. Subsequent runs are fast (incremental).
+First run downloads ~400 Rust crates (~3 min). Subsequent runs are incremental (seconds).
 
 ---
 
-## Install wizard — 5 steps
+## Using the app
 
-Once the app opens:
+### New cluster
+Sidebar → **New Install** → fill the 4-step wizard:
 
-1. **AWS** — pick your named AWS profile, region, VPC ID, subnet ID, key pair name, and bastion hostname/IP
-2. **Topology** — set master count + instance type, worker count + instance type, optional edge node, EBS volume size
-3. **Credentials** — enter CM admin password, FreeIPA admin password, OS user password (saved to macOS Keychain)
-4. **License** — browse to your Cloudera `.license` file
-5. **Review** — confirm all settings, then click **Install**
+1. **Basics** — cluster name, installer repo path, AWS profile, region
+2. **Infrastructure** — SSH key pair name, operator ingress CIDR (the app detects your public IP)
+3. **Passwords** — 6 CDP service passwords (stored in macOS Keychain, never on disk)
+4. **Review** → **Launch Install**
 
-The app writes the Terraform vars and Ansible inventory, then runs each Make phase in order. You can watch live logs per phase and abort at any time.
+### Cluster detail (ready state)
+- **Open CM UI** — spawns an SSH tunnel to `util1.<domain>:7183` and opens `https://localhost:7183/` in your browser
+- **SSH to bastion** — opens Terminal.app with the `ssh` command pre-filled
+- **Copy env vars** — copies `export CDP_*=...` block to clipboard
+- **Destroy** — 2-step confirm dialog (type cluster name) → runs `make tf-destroy`
+
+### Settings
+Sidebar → **Settings**:
+- Set default repo path, AWS profile, region
+- View data directory location
+- Danger zone: forget all secrets / delete all cluster metadata
 
 ---
 
-## Destroying a cluster
+## Configuration
 
-Open the cluster from the Dashboard → **Cluster Detail** → click **Destroy**. The app runs `make tf-destroy` and marks the cluster as destroyed in the local database.
+App data lives at `~/Library/Application Support/com.partomia.cdp-launcher/`:
 
----
-
-## Keyboard shortcuts
-
-| Shortcut | Action |
+| What | Where |
 |---|---|
-| Cmd+1 | Dashboard |
-| Cmd+N | New Install |
-| Cmd+, | Settings |
+| Cluster metadata + phase events | `launcher.db` (SQLite) |
+| Phase log files | `logs/<cluster-id>/<phase>.log` |
+| CDP passwords | macOS Keychain, service `com.partomia.cdp-launcher` |
+
+---
+
+## Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `No rule to make target` | `make` not in PATH | Run via `source ~/.cargo/env && cargo tauri dev` |
+| `InvalidKeyPair.NotFound` | Key pair not in the target region | Import your public key in EC2 → Key Pairs |
+| `avc: denied` in logs | SELinux enforcing on cluster nodes | Use the "Apply Fix" button in the error hint banner |
+| CM UI won't open | Bastion IP not yet captured | Bastion IP is stored after `terraform apply` — only available on ready clusters |
+| First launch blocked | Gatekeeper quarantine | Right-click the app → Open |
+
+See [DESIGN.md](DESIGN.md) for full architecture, data model, and roadmap.
 
 ---
 
 ## Build
 
 ```bash
-make build   # universal binary (x86_64 + arm64)
-make dmg     # packages into dist/cdp-launcher.dmg
-make clean   # removes target/, dist/, node_modules/
-make test    # cargo test + npm test
-make lint    # clippy + eslint + prettier
-```
+# Development (hot-reload)
+source "$HOME/.cargo/env" && cargo tauri dev
 
----
+# Production (universal binary)
+source "$HOME/.cargo/env" && cargo tauri build --target universal-apple-darwin
 
-## Data storage
+# Type check only
+npx tsc --noEmit
 
-| What | Where |
-|---|---|
-| Cluster metadata | `~/Library/Application Support/com.partomia.cdp-launcher/launcher.db` (SQLite) |
-| Passwords & secrets | macOS Keychain, service `com.partomia.cdp-launcher` |
-| Wizard progress | `localStorage` (passwords excluded) |
-
-Verify the database is working:
-```bash
-sqlite3 ~/Library/Application\ Support/com.partomia.cdp-launcher/launcher.db ".tables"
-# → clusters   phase_events   refinery_schema_history
+# Rust lint
+cargo clippy --manifest-path src-tauri/Cargo.toml
 ```
 
 ---
@@ -113,86 +129,61 @@ sqlite3 ~/Library/Application\ Support/com.partomia.cdp-launcher/launcher.db ".t
 
 ```
 cdp-launcher-app/
-  src/                        React frontend
+  src/                          React frontend
     components/
-      AppShell.tsx            Sidebar + top bar layout
-      Sidebar.tsx             Nav, theme toggle, version
-      PhaseTracker.tsx        Phase status list with polling + elapsed time
-      LogPane.tsx             Virtualised live log viewer (search, copy, save)
-      ui/button.tsx           shadcn/ui Button (new-york style)
+      AppShell.tsx              Sidebar + top bar layout
+      Sidebar.tsx               Nav, theme toggle
+      PhaseTracker.tsx          Phase status list with polling
+      LogPane.tsx               Virtualised live log viewer
+      ErrorHintBanner.tsx       Known-error detection + remediation UI
+      ui/button.tsx             shadcn/ui Button
     lib/
-      tauri.ts                Typed wrappers for all Tauri commands
-      types.ts                TypeScript interfaces + PHASE_DEFS + DEFAULT_TFVARS
-      theme.tsx               ThemeProvider (system / light / dark)
-      utils.ts                cn() Tailwind merge helper
+      tauri.ts                  Typed wrappers for all Tauri commands
+      types.ts                  Interfaces: Cluster, PhaseEvent, ErrorHint, etc.
+      theme.tsx                 ThemeProvider
+      utils.ts                  cn() helper
     pages/
-      Dashboard.tsx           Cluster list (empty state)
-      InstallWizard.tsx       4-step install wizard (name → infra → passwords → review)
-      InstallProgress.tsx     Live install view (phase tracker + log pane + cancel)
-      ClusterDetail.tsx       Cluster detail — routes to InstallProgress or ReadyView
-      Settings.tsx            Settings + smoke tests
+      Dashboard.tsx             Cluster table + cost estimates
+      InstallWizard.tsx         4-step install wizard
+      InstallProgress.tsx       Live install/destroy view
+      ClusterDetail.tsx         Detail: overview, phase history, secrets
+      Settings.tsx              Settings + danger zone
 
-  src-tauri/                  Rust backend (Tauri 2.x)
+  src-tauri/                    Rust backend (Tauri 2.x)
     migrations/
-      V1__initial.sql         clusters + phase_events schema
+      V1__initial.sql           clusters + phase_events schema
+      V2__settings.sql          app_settings table
     src/
       commands/
-        aws.rs                AWS CLI wrappers (profiles, identity, key pairs)
-        cluster.rs            Cluster CRUD Tauri commands
-        install.rs            install_start / install_cancel / destroy_start / logs_fetch
-        keychain.rs           macOS Keychain read/write commands
+        aws.rs                  AWS CLI wrappers
+        cluster.rs              Cluster CRUD
+        install.rs              install_start / destroy_start / logs_fetch
+        keychain.rs             macOS Keychain commands
+        ui.rs                   Settings, CM UI, SSH, env vars, remediation
       orchestrator/
-        install.rs            11-phase install orchestrator
-        destroy.rs            Destroy orchestrator (make tf-destroy)
-        tfvars.rs             terraform.tfvars writer (reads secrets from Keychain)
+        install.rs              11-phase install orchestrator
+        destroy.rs              Destroy orchestrator
+        tfvars.rs               terraform.tfvars writer
+        error_hints.rs          Known-error regex patterns
       runner/
-        process.rs            PTY subprocess runner with Tauri log-line events
+        process.rs              PTY subprocess runner + error hint scanning
       state/
-        store.rs              SQLite Store with all DB methods
-      error.rs                AppError (serializable for Tauri IPC)
-      lib.rs                  Tauri builder + command registration
-    tauri.conf.json           Bundle config (com.partomia.cdp-launcher)
+        store.rs                SQLite Store
+      error.rs                  AppError (Tauri IPC-serializable)
+      lib.rs                    Tauri builder + command registration
+
+  .github/workflows/
+    ci.yml                      Lint + typecheck + test on PR/push
+    release.yml                 Universal DMG build + GitHub Release on tag
 
   scripts/
-    bootstrap-dev.sh          One-shot dev environment setup
-  Makefile                    dev / build / dmg / clean / test / lint
-  DESIGN.md                   Full architecture and data model
+    bootstrap-dev.sh            One-shot dev environment setup
+  Makefile                      dev / build / clean shortcuts
+  DESIGN.md                     Architecture and roadmap
 ```
 
 ---
 
-## Current status
+## License
 
-**Phase 1 — Scaffold** (complete)
-- Tauri 2.x + React 18 + Vite 5 + TypeScript skeleton
-- Tailwind CSS 3 + shadcn/ui new-york style
-
-**Phase 2 — Layout shell** (complete)
-- Sidebar with navigation, theme toggle, keyboard shortcuts
-- react-router-dom v6 with 4 routes
-- ThemeProvider (follows macOS system preference, manual toggle)
-
-**Phase 3 — Rust backend** (complete)
-- SQLite state store with refinery migrations
-- macOS Keychain integration
-- AWS CLI command wrappers
-- Cluster CRUD Tauri commands
-- Typed TypeScript client (`src/lib/tauri.ts`)
-
-**Phase 4 — Orchestration + UI** (complete)
-- PTY subprocess runner with live `log-line` Tauri events (portable-pty)
-- Cancel via SIGTERM; stale running phases auto-interrupted on startup
-- 11-phase install orchestrator: tfvars → TF init/plan/apply → make phases
-- Destroy orchestrator (`make tf-destroy`)
-- `PhaseTracker` component: polls phase events every 2.5 s, status icons, elapsed time
-- `LogPane` component: virtualised scroll, real-time streaming, search, copy, save
-- `InstallProgress` page: phase tracker + log pane + Cancel button
-- `ClusterDetail` routes to `InstallProgress` while installing/destroying/failed
-- 4-step `InstallWizard`: collects cluster config + 6 credentials → Keychain → cluster create → install start
-
-**Phase 5 — Dashboard + Destroy flow** (next)
-- Cluster list on Dashboard with live state badges
-- Destroy button on cluster detail (ready state)
-- Settings page with profile picker and defaults editor
-
-See [DESIGN.md](DESIGN.md) for the full roadmap and architecture details.
+MIT © Partomia

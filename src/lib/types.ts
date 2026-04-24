@@ -132,6 +132,38 @@ export interface AppError {
 // Phase UI metadata
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Error hints (emitted as "error-hint" Tauri event)
+// ---------------------------------------------------------------------------
+
+export interface ErrorHint {
+  name: string;
+  severity: string; // "blocker" | "warning"
+  summary: string;
+  remediation: string;
+  remediation_command: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// App settings
+// ---------------------------------------------------------------------------
+
+export interface AppSettings {
+  default_repo_path: string;
+  default_aws_profile: string;
+  default_aws_region: string;
+}
+
+// ---------------------------------------------------------------------------
+// Cluster metadata (populated from terraform output -json after apply)
+// ---------------------------------------------------------------------------
+
+export interface ClusterMetadata {
+  bastion_public_ip?: string;
+  bastion_private_ip?: string;
+  [key: string]: string | undefined;
+}
+
 export const PHASE_DEFS = [
   { key: "tfvars",          label: "Write tfvars" },
   { key: "terraform_init",  label: "Terraform Init" },

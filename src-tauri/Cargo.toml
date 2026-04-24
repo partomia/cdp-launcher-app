@@ -36,6 +36,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 dirs = "5"
 portable-pty = "0.8"
 libc = "0.2"
+regex = "1"
+once_cell = "1"
 
 [profile.release]
 panic = "abort"

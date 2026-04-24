@@ -6,7 +6,7 @@ mod state;
 
 use std::sync::Arc;
 
-use commands::{aws, cluster, install, keychain};
+use commands::{aws, cluster, install, keychain, ui};
 use runner::RunnerState;
 use state::Store;
 
@@ -56,6 +56,15 @@ pub fn run() {
             install::install_cancel,
             install::destroy_start,
             install::logs_fetch,
+            // Settings + UI helpers
+            ui::settings_get,
+            ui::settings_set,
+            ui::forget_all_secrets,
+            ui::delete_all_clusters,
+            ui::cluster_env_vars,
+            ui::open_cm_ui,
+            ui::open_ssh_terminal,
+            ui::run_remediation,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

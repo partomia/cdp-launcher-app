@@ -1,114 +1,262 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { awsProfileList, keychainGet, keychainSet } from "@/lib/tauri";
-import type { AppError } from "@/lib/types";
+import { cn } from "@/lib/utils";
+import {
+  settingsGet,
+  settingsSet,
+  forgetAllSecrets,
+  deleteAllClusters,
+} from "@/lib/tauri";
 
-type TestState =
-  | { status: "idle" }
-  | { status: "running" }
-  | { status: "ok"; detail: string }
-  | { status: "err"; detail: string };
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
-function isAppError(e: unknown): e is AppError {
-  return typeof e === "object" && e !== null && "kind" in e && "message" in e;
+function Field({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <label className="block text-[13px] font-medium">{label}</label>
+      {children}
+      {hint && <p className="text-[11px] text-muted-foreground">{hint}</p>}
+    </div>
+  );
 }
 
-function errorMessage(e: unknown): string {
-  if (isAppError(e)) return e.message;
-  if (e instanceof Error) return e.message;
-  return String(e);
+function TextInput({
+  value,
+  onChange,
+  placeholder,
+  readOnly,
+}: {
+  value: string;
+  onChange?: (v: string) => void;
+  placeholder?: string;
+  readOnly?: boolean;
+}) {
+  return (
+    <input
+      type="text"
+      value={value}
+      readOnly={readOnly}
+      onChange={(e) => onChange?.(e.target.value)}
+      placeholder={placeholder}
+      className={cn(
+        "w-full rounded-md border border-border bg-background px-3 py-2 text-[13px] outline-none",
+        "placeholder:text-muted-foreground/60",
+        readOnly
+          ? "text-muted-foreground cursor-default"
+          : "focus:ring-1 focus:ring-ring"
+      )}
+    />
+  );
 }
+
+// ---------------------------------------------------------------------------
+// Settings page
+// ---------------------------------------------------------------------------
 
 export default function Settings() {
-  const [awsTest, setAwsTest] = useState<TestState>({ status: "idle" });
-  const [kcTest, setKcTest] = useState<TestState>({ status: "idle" });
+  const [settings, setSettings] = useState<Record<string, string>>({});
+  const [saved, setSaved] = useState(false);
+  const [dangerConfirm, setDangerConfirm] = useState<"secrets" | "metadata" | null>(null);
+  const [dangerBusy, setDangerBusy] = useState(false);
+  const [dangerMsg, setDangerMsg] = useState<string | null>(null);
+  const [dataDir, setDataDir] = useState("");
 
-  async function runAwsTest() {
-    setAwsTest({ status: "running" });
-    try {
-      const profiles = await awsProfileList();
-      setAwsTest({
-        status: "ok",
-        detail: profiles.length > 0
-          ? `Found ${profiles.length} profile(s): ${profiles.join(", ")}`
-          : "No profiles found in ~/.aws/config",
-      });
-    } catch (e) {
-      setAwsTest({ status: "err", detail: errorMessage(e) });
-    }
+  useEffect(() => {
+    settingsGet().then(setSettings).catch(() => {});
+    // Data directory is stable based on macOS convention
+    setDataDir(`~/Library/Application Support/com.partomia.cdp-launcher`);
+  }, []);
+
+  function set(key: string, value: string) {
+    setSettings((s) => ({ ...s, [key]: value }));
+    setSaved(false);
   }
 
-  async function runKeychainTest() {
-    setKcTest({ status: "running" });
-    const testClusterId = "__smoke_test__";
-    const testKey = "SMOKE_TEST";
-    const testValue = "cdp-launcher-keychain-ok";
+  async function save() {
+    for (const [key, value] of Object.entries(settings)) {
+      await settingsSet(key, value);
+    }
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  }
+
+  async function runDangerAction() {
+    if (!dangerConfirm) return;
+    setDangerBusy(true);
+    setDangerMsg(null);
     try {
-      await keychainSet(testClusterId, testKey, testValue);
-      const readBack = await keychainGet(testClusterId, testKey);
-      if (readBack === testValue) {
-        setKcTest({ status: "ok", detail: "Write → read → match ✓" });
+      if (dangerConfirm === "secrets") {
+        await forgetAllSecrets();
+        setDangerMsg("All Keychain secrets have been removed.");
       } else {
-        setKcTest({ status: "err", detail: `Value mismatch: got "${readBack}"` });
+        await deleteAllClusters();
+        setDangerMsg("All cluster metadata has been deleted.");
       }
-    } catch (e) {
-      setKcTest({ status: "err", detail: errorMessage(e) });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message
+        : (typeof e === "object" && e !== null && "message" in e)
+          ? String((e as { message: unknown }).message)
+          : String(e);
+      setDangerMsg(`Error: ${msg}`);
+    } finally {
+      setDangerBusy(false);
+      setDangerConfirm(null);
     }
   }
+
+  const version = "0.1.0";
 
   return (
-    <div className="p-8 max-w-xl space-y-8">
-      <p className="text-[14px] text-muted-foreground">
-        Settings — coming in prompt 5
-      </p>
+    <div className="p-8 max-w-2xl space-y-10">
 
-      {/* AWS smoke test */}
-      <div className="space-y-3">
-        <h2 className="text-[14px] font-medium">AWS CLI</h2>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={runAwsTest}
-          disabled={awsTest.status === "running"}
+      {/* Installer repo */}
+      <section className="space-y-4">
+        <h2 className="text-[14px] font-semibold">Defaults</h2>
+        <Field
+          label="Installer repo path"
+          hint="Default path to the cdp-732-automation clone (overridable per cluster in the wizard)"
         >
-          {awsTest.status === "running" ? "Testing…" : "Test AWS profile list"}
-        </Button>
-        {awsTest.status !== "idle" && awsTest.status !== "running" && (
-          <p
-            className={`text-[13px] ${
-              awsTest.status === "ok"
-                ? "text-green-600 dark:text-green-400"
-                : "text-destructive"
-            }`}
-          >
-            {awsTest.detail}
-          </p>
-        )}
-      </div>
+          <TextInput
+            value={settings.default_repo_path ?? ""}
+            onChange={(v) => set("default_repo_path", v)}
+            placeholder="/Users/you/IdeaProjects/cdp-732-automation"
+          />
+        </Field>
+        <Field label="Default AWS profile">
+          <TextInput
+            value={settings.default_aws_profile ?? ""}
+            onChange={(v) => set("default_aws_profile", v)}
+            placeholder="default"
+          />
+        </Field>
+        <Field label="Default region">
+          <TextInput
+            value={settings.default_aws_region ?? ""}
+            onChange={(v) => set("default_aws_region", v)}
+            placeholder="ap-south-1"
+          />
+        </Field>
+        <div className="flex items-center gap-3">
+          <Button size="sm" onClick={save}>Save</Button>
+          {saved && (
+            <span className="text-[12px] text-green-600 dark:text-green-400">Saved ✓</span>
+          )}
+        </div>
+      </section>
 
-      {/* Keychain smoke test */}
-      <div className="space-y-3">
-        <h2 className="text-[14px] font-medium">macOS Keychain</h2>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={runKeychainTest}
-          disabled={kcTest.status === "running"}
+      {/* Data directory */}
+      <section className="space-y-4">
+        <h2 className="text-[14px] font-semibold">Data directory</h2>
+        <Field
+          label="Location"
+          hint="SQLite database (launcher.db) and phase log files live here"
         >
-          {kcTest.status === "running" ? "Testing…" : "Test Keychain"}
-        </Button>
-        {kcTest.status !== "idle" && kcTest.status !== "running" && (
-          <p
-            className={`text-[13px] ${
-              kcTest.status === "ok"
-                ? "text-green-600 dark:text-green-400"
-                : "text-destructive"
-            }`}
-          >
-            {kcTest.detail}
-          </p>
-        )}
-      </div>
+          <TextInput value={dataDir} readOnly />
+        </Field>
+        <p className="text-[12px] text-muted-foreground">
+          Secrets are stored in the macOS Keychain under service{" "}
+          <code className="font-mono">com.partomia.cdp-launcher</code>.
+        </p>
+      </section>
+
+      {/* Danger zone */}
+      <section className="space-y-4 border border-destructive/30 rounded-lg p-4">
+        <h2 className="text-[14px] font-semibold text-destructive">Danger zone</h2>
+
+        <div className="space-y-3">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-[13px] font-medium">Forget all secrets</p>
+              <p className="text-[12px] text-muted-foreground">
+                Removes all CDP passwords from macOS Keychain for every cluster.
+              </p>
+            </div>
+            {dangerConfirm === "secrets" ? (
+              <div className="flex gap-1.5 flex-shrink-0">
+                <Button size="sm" variant="destructive" onClick={runDangerAction} disabled={dangerBusy}>
+                  Confirm
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setDangerConfirm(null)}>
+                  Cancel
+                </Button>
+              </div>
+            ) : (
+              <Button
+                size="sm"
+                variant="outline"
+                className="flex-shrink-0 text-destructive border-destructive/40 hover:bg-destructive/10"
+                onClick={() => setDangerConfirm("secrets")}
+              >
+                Forget secrets
+              </Button>
+            )}
+          </div>
+
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-[13px] font-medium">Delete all cluster metadata</p>
+              <p className="text-[12px] text-muted-foreground">
+                Removes all cluster rows from the SQLite database. Log files on disk are kept.
+              </p>
+            </div>
+            {dangerConfirm === "metadata" ? (
+              <div className="flex gap-1.5 flex-shrink-0">
+                <Button size="sm" variant="destructive" onClick={runDangerAction} disabled={dangerBusy}>
+                  Confirm
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setDangerConfirm(null)}>
+                  Cancel
+                </Button>
+              </div>
+            ) : (
+              <Button
+                size="sm"
+                variant="outline"
+                className="flex-shrink-0 text-destructive border-destructive/40 hover:bg-destructive/10"
+                onClick={() => setDangerConfirm("metadata")}
+              >
+                Delete metadata
+              </Button>
+            )}
+          </div>
+
+          {dangerMsg && (
+            <p className={cn(
+              "text-[12px]",
+              dangerMsg.startsWith("Error") ? "text-destructive" : "text-green-600 dark:text-green-400"
+            )}>
+              {dangerMsg}
+            </p>
+          )}
+        </div>
+      </section>
+
+      {/* About */}
+      <section className="space-y-2">
+        <h2 className="text-[14px] font-semibold">About</h2>
+        <div className="rounded-lg border border-border/50 divide-y divide-border/50 text-[13px]">
+          {[
+            ["Version", version],
+            ["Repository", "github.com/partomia/cdp-launcher-app"],
+            ["License", "MIT"],
+          ].map(([label, value]) => (
+            <div key={label} className="flex px-4 py-2.5 gap-4">
+              <span className="w-24 text-muted-foreground">{label}</span>
+              <span className="font-mono text-[12px]">{value}</span>
+            </div>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }

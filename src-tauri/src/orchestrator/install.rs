@@ -185,7 +185,7 @@ async fn run_install_inner(ctx: InstallCtx) -> Result<(), AppError> {
             }
 
             Phase::TerraformApply => {
-                run_phase(
+                let code = run_phase(
                     &ctx,
                     phase_key,
                     tf_dir.clone(),
@@ -193,7 +193,12 @@ async fn run_install_inner(ctx: InstallCtx) -> Result<(), AppError> {
                     &["apply", "-auto-approve", "cdp732.tfplan"],
                     base_env.clone(),
                 )
-                .await?
+                .await?;
+                // On success, capture terraform output and store in metadata_json
+                if code == 0 {
+                    capture_terraform_outputs(&ctx, &tf_dir, &base_env);
+                }
+                code
             }
 
             // ----------------------------------------------------------------
@@ -312,6 +317,47 @@ async fn run_install_inner(ctx: InstallCtx) -> Result<(), AppError> {
     let _ = ctx.app.emit("install-complete", &ctx.cluster_id);
 
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Capture terraform output -json and persist as metadata_json
+// ---------------------------------------------------------------------------
+
+fn capture_terraform_outputs(
+    ctx: &InstallCtx,
+    tf_dir: &std::path::Path,
+    env: &HashMap<String, String>,
+) {
+    let mut cmd = std::process::Command::new("terraform");
+    cmd.arg("output").arg("-json").current_dir(tf_dir);
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    match cmd.output() {
+        Err(e) => tracing::warn!("terraform output failed: {e}"),
+        Ok(out) if !out.status.success() => {
+            tracing::warn!("terraform output non-zero exit");
+        }
+        Ok(out) => {
+            let raw = String::from_utf8_lossy(&out.stdout);
+            // Flatten { "key": { "value": V, ... } } → { "key": V }
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&raw) {
+                let mut flat = serde_json::Map::new();
+                if let Some(obj) = parsed.as_object() {
+                    for (k, v) in obj {
+                        let val = v.get("value").cloned().unwrap_or(v.clone());
+                        flat.insert(k.clone(), val);
+                    }
+                }
+                let metadata = serde_json::to_string(&flat).unwrap_or_else(|_| raw.to_string());
+                if let Err(e) = ctx.store.update_cluster_metadata(&ctx.cluster_id, &metadata) {
+                    tracing::warn!("failed to store cluster metadata: {e}");
+                } else {
+                    tracing::info!("stored terraform outputs in cluster metadata");
+                }
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

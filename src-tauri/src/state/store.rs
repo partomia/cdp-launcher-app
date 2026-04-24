@@ -256,6 +256,64 @@ impl Store {
         Ok(n as u64)
     }
 
+    pub fn update_cluster_metadata(&self, id: &str, metadata_json: &str) -> Result<(), AppError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE clusters SET metadata_json = ?1 WHERE id = ?2",
+            params![metadata_json, id],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_all_clusters(&self) -> Result<(), AppError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM clusters", [])?;
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // Settings queries
+    // -----------------------------------------------------------------------
+
+    #[allow(dead_code)]
+    pub fn get_setting(&self, key: &str) -> Result<Option<String>, AppError> {
+        let conn = self.conn.lock().unwrap();
+        let result = conn.query_row(
+            "SELECT value FROM app_settings WHERE key = ?1",
+            params![key],
+            |row| row.get::<_, String>(0),
+        );
+        match result {
+            Ok(v) => Ok(Some(v)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(AppError::Database(e)),
+        }
+    }
+
+    pub fn set_setting(&self, key: &str, value: &str) -> Result<(), AppError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO app_settings (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![key, value],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_settings(&self) -> Result<std::collections::HashMap<String, String>, AppError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT key, value FROM app_settings")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut map = std::collections::HashMap::new();
+        for row in rows {
+            let (k, v) = row.map_err(AppError::Database)?;
+            map.insert(k, v);
+        }
+        Ok(map)
+    }
+
     pub fn list_phase_events_for_cluster(&self, cluster_id: &str) -> Result<Vec<PhaseEvent>, AppError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
