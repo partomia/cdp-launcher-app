@@ -1,14 +1,21 @@
-function App() {
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { AppShell } from "./components/AppShell";
+import Dashboard from "./pages/Dashboard";
+import InstallWizard from "./pages/InstallWizard";
+import ClusterDetail from "./pages/ClusterDetail";
+import Settings from "./pages/Settings";
+
+export default function App() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background text-foreground">
-      <div className="text-center">
-        <h1 className="text-4xl font-bold tracking-tight">CDP Launcher</h1>
-        <p className="mt-4 text-muted-foreground">
-          Cloudera Data Platform 7.3.2 — cluster provisioning for SEs
-        </p>
-      </div>
-    </div>
+    <BrowserRouter>
+      <Routes>
+        <Route element={<AppShell />}>
+          <Route index element={<Dashboard />} />
+          <Route path="/install" element={<InstallWizard />} />
+          <Route path="/cluster/:id" element={<ClusterDetail />} />
+          <Route path="/settings" element={<Settings />} />
+        </Route>
+      </Routes>
+    </BrowserRouter>
   );
 }
-
-export default App;
