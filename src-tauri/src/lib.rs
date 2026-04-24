@@ -1,8 +1,13 @@
 mod commands;
 mod error;
+mod orchestrator;
+mod runner;
 mod state;
 
-use commands::{aws, cluster, keychain};
+use std::sync::Arc;
+
+use commands::{aws, cluster, install, keychain};
+use runner::RunnerState;
 use state::Store;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -14,11 +19,21 @@ pub fn run() {
         )
         .init();
 
-    let store = Store::open().expect("failed to open database");
+    let store = Arc::new(Store::open().expect("failed to open database"));
+    let runner = Arc::new(RunnerState::new());
+
+    // On startup: mark any phase that was "running" for > 5 min as interrupted.
+    // This handles app restarts mid-install.
+    match store.mark_stale_phases() {
+        Ok(0) => {}
+        Ok(n) => tracing::warn!("marked {n} stale phase(s) as interrupted on startup"),
+        Err(e) => tracing::error!("failed to mark stale phases: {e}"),
+    }
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .manage(store)
+        .manage(runner)
         .invoke_handler(tauri::generate_handler![
             // Keychain
             keychain::keychain_set,
@@ -36,6 +51,11 @@ pub fn run() {
             cluster::cluster_create,
             cluster::cluster_delete_metadata,
             cluster::cluster_phase_events,
+            // Install / destroy orchestration
+            install::install_start,
+            install::install_cancel,
+            install::destroy_start,
+            install::logs_fetch,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
