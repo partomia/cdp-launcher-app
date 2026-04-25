@@ -314,6 +314,24 @@ impl Store {
         Ok(map)
     }
 
+    /// Returns true if the most-recent event for this phase has status='success'.
+    /// Used by the orchestrator to skip already-completed phases on resume.
+    pub fn phase_succeeded(&self, cluster_id: &str, phase: &str) -> Result<bool, AppError> {
+        let conn = self.conn.lock().unwrap();
+        let result = conn.query_row(
+            "SELECT status FROM phase_events
+             WHERE cluster_id=?1 AND phase=?2
+             ORDER BY id DESC LIMIT 1",
+            params![cluster_id, phase],
+            |row| row.get::<_, String>(0),
+        );
+        match result {
+            Ok(status) => Ok(status == "success"),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(false),
+            Err(e) => Err(AppError::Database(e)),
+        }
+    }
+
     pub fn list_phase_events_for_cluster(&self, cluster_id: &str) -> Result<Vec<PhaseEvent>, AppError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(

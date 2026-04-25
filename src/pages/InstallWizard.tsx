@@ -53,7 +53,7 @@ function Input({
       className={cn(
         "w-full rounded-md border border-border bg-background px-3 py-2 text-[13px] outline-none",
         "focus:ring-1 focus:ring-ring placeholder:text-muted-foreground/60",
-        className
+        className,
       )}
     />
   );
@@ -83,7 +83,11 @@ function PasswordInput({
         onClick={() => setShow((s) => !s)}
         className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
       >
-        {show ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+        {show ? (
+          <EyeOff className="h-3.5 w-3.5" />
+        ) : (
+          <Eye className="h-3.5 w-3.5" />
+        )}
       </button>
     </div>
   );
@@ -146,7 +150,10 @@ function Step1({
 
   return (
     <div className="space-y-5">
-      <Field label="Cluster name" hint="Short identifier for this CDP deployment">
+      <Field
+        label="Cluster name"
+        hint="Short identifier for this CDP deployment"
+      >
         <Input
           value={form.clusterName}
           onChange={set("clusterName")}
@@ -172,7 +179,7 @@ function Step1({
             onChange={(e) => set("awsProfile")(e.target.value)}
             className={cn(
               "w-full rounded-md border border-border bg-background px-3 py-2 text-[13px] outline-none",
-              "focus:ring-1 focus:ring-ring"
+              "focus:ring-1 focus:ring-ring",
             )}
           >
             <option value="">Select a profile…</option>
@@ -264,7 +271,8 @@ function Step3({
   return (
     <div className="space-y-5">
       <p className="text-[12px] text-muted-foreground">
-        These are stored securely in macOS Keychain — never written to disk unencrypted.
+        These are stored securely in macOS Keychain — never written to disk
+        unencrypted.
       </p>
       {fields.map(([key, label, hint]) => (
         <Field key={key} label={label} hint={hint}>
@@ -298,14 +306,20 @@ function Step4({ form }: { form: WizardForm }) {
   return (
     <div className="space-y-4">
       <p className="text-[12px] text-muted-foreground">
-        Review your settings. Clicking Launch will write credentials to Keychain and begin the
-        installation.
+        Review your settings. Clicking Launch will write credentials to Keychain
+        and begin the installation.
       </p>
       <div className="rounded-lg border border-border/50 divide-y divide-border/50 text-[13px]">
         {rows.map(([label, value]) => (
           <div key={label} className="flex px-4 py-2 gap-4">
-            <span className="w-32 text-muted-foreground flex-shrink-0">{label}</span>
-            <span className="font-mono text-[12px] break-all">{value || <em className="not-italic text-muted-foreground/50">(empty)</em>}</span>
+            <span className="w-32 text-muted-foreground flex-shrink-0">
+              {label}
+            </span>
+            <span className="font-mono text-[12px] break-all">
+              {value || (
+                <em className="not-italic text-muted-foreground/50">(empty)</em>
+              )}
+            </span>
           </div>
         ))}
       </div>
@@ -355,19 +369,26 @@ export default function InstallWizard() {
 
   // Fetch AWS profiles on mount
   useEffect(() => {
-    awsProfileList().then(setProfiles).catch(() => {});
+    awsProfileList()
+      .then(setProfiles)
+      .catch(() => {});
   }, []);
 
   // Detect public IP when user reaches step 2
   useEffect(() => {
     if (step === 1 && !detectedIp) {
-      awsDetectPublicIp().then(setDetectedIp).catch(() => {});
+      awsDetectPublicIp()
+        .then(setDetectedIp)
+        .catch(() => {});
     }
   }, [step, detectedIp]);
 
   function next() {
     const err = validateStep(step, form);
-    if (err) { setValidationError(err); return; }
+    if (err) {
+      setValidationError(err);
+      return;
+    }
     setValidationError(null);
     setStep((s) => s + 1);
   }
@@ -379,7 +400,10 @@ export default function InstallWizard() {
 
   async function launch() {
     const err = validateStep(step, form);
-    if (err) { setValidationError(err); return; }
+    if (err) {
+      setValidationError(err);
+      return;
+    }
     setLaunchError(null);
     setLaunching(true);
 
@@ -424,11 +448,12 @@ export default function InstallWizard() {
       // 5. Navigate to cluster detail
       navigate(`/cluster/${cluster.id}`);
     } catch (e: unknown) {
-      const msg = e instanceof Error
-        ? e.message
-        : (typeof e === "object" && e !== null && "message" in e)
-          ? String((e as { message: unknown }).message)
-          : String(e);
+      const msg =
+        e instanceof Error
+          ? e.message
+          : typeof e === "object" && e !== null && "message" in e
+            ? String((e as { message: unknown }).message)
+            : String(e);
       setLaunchError(msg);
       setLaunching(false);
     }
@@ -442,7 +467,10 @@ export default function InstallWizard() {
         {/* Step indicators */}
         <div className="flex items-center gap-0">
           {STEPS.map((label, i) => (
-            <div key={label} className="flex items-center flex-1 last:flex-none">
+            <div
+              key={label}
+              className="flex items-center flex-1 last:flex-none"
+            >
               <div className="flex items-center gap-2">
                 <div
                   className={cn(
@@ -451,7 +479,7 @@ export default function InstallWizard() {
                       ? "bg-primary text-primary-foreground"
                       : i === step
                         ? "bg-primary/20 text-primary border border-primary"
-                        : "bg-muted text-muted-foreground"
+                        : "bg-muted text-muted-foreground",
                   )}
                 >
                   {i + 1}
@@ -459,7 +487,7 @@ export default function InstallWizard() {
                 <span
                   className={cn(
                     "text-[12px] font-medium",
-                    i === step ? "text-foreground" : "text-muted-foreground"
+                    i === step ? "text-foreground" : "text-muted-foreground",
                   )}
                 >
                   {label}
@@ -474,8 +502,12 @@ export default function InstallWizard() {
 
         {/* Step content */}
         <div className="rounded-xl border border-border/50 bg-card p-6 shadow-sm">
-          {step === 0 && <Step1 form={form} setForm={setForm} profiles={profiles} />}
-          {step === 1 && <Step2 form={form} setForm={setForm} detectedIp={detectedIp} />}
+          {step === 0 && (
+            <Step1 form={form} setForm={setForm} profiles={profiles} />
+          )}
+          {step === 1 && (
+            <Step2 form={form} setForm={setForm} detectedIp={detectedIp} />
+          )}
           {step === 2 && <Step3 form={form} setForm={setForm} />}
           {step === 3 && <Step4 form={form} />}
         </div>

@@ -23,12 +23,23 @@ function ageSince(iso: string): string {
 
 // Rough on-demand pricing for ap-south-1 (USD/hr)
 const PRICE_MAP: Record<string, number> = {
-  "t3.micro":  0.011, "t3.small":  0.023, "t3.medium": 0.046, "t3.large": 0.091,
-  "m5.large":  0.096, "m5.xlarge": 0.192, "m5.2xlarge": 0.384, "m5.4xlarge": 0.768,
+  "t3.micro": 0.011,
+  "t3.small": 0.023,
+  "t3.medium": 0.046,
+  "t3.large": 0.091,
+  "m5.large": 0.096,
+  "m5.xlarge": 0.192,
+  "m5.2xlarge": 0.384,
+  "m5.4xlarge": 0.768,
   "m5.8xlarge": 1.536,
-  "r5.large":  0.126, "r5.xlarge": 0.252, "r5.2xlarge": 0.504, "r5.4xlarge": 1.008,
+  "r5.large": 0.126,
+  "r5.xlarge": 0.252,
+  "r5.2xlarge": 0.504,
+  "r5.4xlarge": 1.008,
   "r5.8xlarge": 2.016,
-  "c5.large":  0.085, "c5.xlarge": 0.170, "c5.2xlarge": 0.340,
+  "c5.large": 0.085,
+  "c5.xlarge": 0.17,
+  "c5.2xlarge": 0.34,
 };
 
 function costPerHour(tfvars: TfvarsConfig): number {
@@ -36,7 +47,7 @@ function costPerHour(tfvars: TfvarsConfig): number {
   return (
     tfvars.master_count * p(tfvars.master_instance_type) +
     tfvars.worker_count * p(tfvars.worker_instance_type) +
-    tfvars.edge_count   * p(tfvars.edge_instance_type) +
+    tfvars.edge_count * p(tfvars.edge_instance_type) +
     p(tfvars.bastion_instance_type) +
     p(tfvars.ipa_instance_type) +
     p(tfvars.util_instance_type)
@@ -66,18 +77,21 @@ function workerCount(cluster: Cluster): string {
 
 function StateBadge({ state }: { state: string }) {
   const cls: Record<string, string> = {
-    draft:      "bg-muted text-muted-foreground",
+    draft: "bg-muted text-muted-foreground",
     installing: "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300",
-    ready:      "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300",
-    failed:     "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300",
-    destroying: "bg-orange-100 text-orange-700 dark:bg-orange-950 dark:text-orange-300",
-    destroyed:  "bg-muted text-muted-foreground",
+    ready: "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300",
+    failed: "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300",
+    destroying:
+      "bg-orange-100 text-orange-700 dark:bg-orange-950 dark:text-orange-300",
+    destroyed: "bg-muted text-muted-foreground",
   };
   return (
-    <span className={cn(
-      "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium capitalize",
-      cls[state] ?? "bg-muted text-muted-foreground"
-    )}>
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium capitalize",
+        cls[state] ?? "bg-muted text-muted-foreground",
+      )}
+    >
       {state}
     </span>
   );
@@ -94,12 +108,18 @@ export default function Dashboard() {
   const [destroying, setDestroying] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    try { setClusters(await clusterList()); }
-    catch { /* ignore */ }
-    finally { setLoading(false); }
+    try {
+      setClusters(await clusterList());
+    } catch {
+      /* ignore */
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
   // Refresh when installs/destroys complete
   useEffect(() => {
@@ -107,7 +127,9 @@ export default function Dashboard() {
       listen("install-complete", load),
       listen("destroy-complete", load),
     ];
-    return () => { subs.forEach((p) => p.then((fn) => fn())); };
+    return () => {
+      subs.forEach((p) => p.then((fn) => fn()));
+    };
   }, [load]);
 
   async function handleDestroy(cluster: Cluster) {
@@ -176,8 +198,19 @@ export default function Dashboard() {
         <table className="w-full text-[13px]">
           <thead>
             <tr className="border-b border-border/50 bg-muted/30">
-              {["Name", "State", "Region", "Workers", "Age", "Est. Cost", ""].map((h) => (
-                <th key={h} className="px-4 py-2.5 text-left text-[11px] font-medium text-muted-foreground uppercase tracking-wide whitespace-nowrap">
+              {[
+                "Name",
+                "State",
+                "Region",
+                "Workers",
+                "Age",
+                "Est. Cost",
+                "",
+              ].map((h) => (
+                <th
+                  key={h}
+                  className="px-4 py-2.5 text-left text-[11px] font-medium text-muted-foreground uppercase tracking-wide whitespace-nowrap"
+                >
                   {h}
                 </th>
               ))}
@@ -185,10 +218,7 @@ export default function Dashboard() {
           </thead>
           <tbody className="divide-y divide-border/30">
             {clusters.map((c) => (
-              <tr
-                key={c.id}
-                className="hover:bg-muted/20 transition-colors"
-              >
+              <tr key={c.id} className="hover:bg-muted/20 transition-colors">
                 <td className="px-4 py-3 font-medium">{c.name}</td>
                 <td className="px-4 py-3">
                   <StateBadge state={c.state} />

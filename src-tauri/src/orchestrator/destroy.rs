@@ -35,6 +35,9 @@ async fn run_destroy_inner(ctx: DestroyCtx) -> Result<(), AppError> {
     let mut env = HashMap::new();
     env.insert("AWS_PROFILE".into(), ctx.aws_profile.clone());
     env.insert("AWS_DEFAULT_REGION".into(), ctx.aws_region.clone());
+    // Keep the installer repo's target, but force Terraform destroy to run
+    // non-interactively so the desktop workflow does not hang at a prompt.
+    env.insert("TF_CLI_ARGS_destroy".into(), "-auto-approve".into());
 
     let exit_code = execute_command(
         ctx.app.clone(),

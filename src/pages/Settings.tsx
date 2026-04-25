@@ -53,7 +53,7 @@ function TextInput({
         "placeholder:text-muted-foreground/60",
         readOnly
           ? "text-muted-foreground cursor-default"
-          : "focus:ring-1 focus:ring-ring"
+          : "focus:ring-1 focus:ring-ring",
       )}
     />
   );
@@ -66,13 +66,17 @@ function TextInput({
 export default function Settings() {
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [saved, setSaved] = useState(false);
-  const [dangerConfirm, setDangerConfirm] = useState<"secrets" | "metadata" | null>(null);
+  const [dangerConfirm, setDangerConfirm] = useState<
+    "secrets" | "metadata" | null
+  >(null);
   const [dangerBusy, setDangerBusy] = useState(false);
   const [dangerMsg, setDangerMsg] = useState<string | null>(null);
   const [dataDir, setDataDir] = useState("");
 
   useEffect(() => {
-    settingsGet().then(setSettings).catch(() => {});
+    settingsGet()
+      .then(setSettings)
+      .catch(() => {});
     // Data directory is stable based on macOS convention
     setDataDir(`~/Library/Application Support/com.partomia.cdp-launcher`);
   }, []);
@@ -103,10 +107,12 @@ export default function Settings() {
         setDangerMsg("All cluster metadata has been deleted.");
       }
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message
-        : (typeof e === "object" && e !== null && "message" in e)
-          ? String((e as { message: unknown }).message)
-          : String(e);
+      const msg =
+        e instanceof Error
+          ? e.message
+          : typeof e === "object" && e !== null && "message" in e
+            ? String((e as { message: unknown }).message)
+            : String(e);
       setDangerMsg(`Error: ${msg}`);
     } finally {
       setDangerBusy(false);
@@ -118,7 +124,6 @@ export default function Settings() {
 
   return (
     <div className="p-8 max-w-2xl space-y-10">
-
       {/* Installer repo */}
       <section className="space-y-4">
         <h2 className="text-[14px] font-semibold">Defaults</h2>
@@ -147,9 +152,13 @@ export default function Settings() {
           />
         </Field>
         <div className="flex items-center gap-3">
-          <Button size="sm" onClick={save}>Save</Button>
+          <Button size="sm" onClick={save}>
+            Save
+          </Button>
           {saved && (
-            <span className="text-[12px] text-green-600 dark:text-green-400">Saved ✓</span>
+            <span className="text-[12px] text-green-600 dark:text-green-400">
+              Saved ✓
+            </span>
           )}
         </div>
       </section>
@@ -171,7 +180,9 @@ export default function Settings() {
 
       {/* Danger zone */}
       <section className="space-y-4 border border-destructive/30 rounded-lg p-4">
-        <h2 className="text-[14px] font-semibold text-destructive">Danger zone</h2>
+        <h2 className="text-[14px] font-semibold text-destructive">
+          Danger zone
+        </h2>
 
         <div className="space-y-3">
           <div className="flex items-start justify-between gap-4">
@@ -183,10 +194,19 @@ export default function Settings() {
             </div>
             {dangerConfirm === "secrets" ? (
               <div className="flex gap-1.5 flex-shrink-0">
-                <Button size="sm" variant="destructive" onClick={runDangerAction} disabled={dangerBusy}>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={runDangerAction}
+                  disabled={dangerBusy}
+                >
                   Confirm
                 </Button>
-                <Button size="sm" variant="outline" onClick={() => setDangerConfirm(null)}>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setDangerConfirm(null)}
+                >
                   Cancel
                 </Button>
               </div>
@@ -204,17 +224,29 @@ export default function Settings() {
 
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-[13px] font-medium">Delete all cluster metadata</p>
+              <p className="text-[13px] font-medium">
+                Delete all cluster metadata
+              </p>
               <p className="text-[12px] text-muted-foreground">
-                Removes all cluster rows from the SQLite database. Log files on disk are kept.
+                Removes all cluster rows from the SQLite database. Log files on
+                disk are kept.
               </p>
             </div>
             {dangerConfirm === "metadata" ? (
               <div className="flex gap-1.5 flex-shrink-0">
-                <Button size="sm" variant="destructive" onClick={runDangerAction} disabled={dangerBusy}>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={runDangerAction}
+                  disabled={dangerBusy}
+                >
                   Confirm
                 </Button>
-                <Button size="sm" variant="outline" onClick={() => setDangerConfirm(null)}>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setDangerConfirm(null)}
+                >
                   Cancel
                 </Button>
               </div>
@@ -231,10 +263,14 @@ export default function Settings() {
           </div>
 
           {dangerMsg && (
-            <p className={cn(
-              "text-[12px]",
-              dangerMsg.startsWith("Error") ? "text-destructive" : "text-green-600 dark:text-green-400"
-            )}>
+            <p
+              className={cn(
+                "text-[12px]",
+                dangerMsg.startsWith("Error")
+                  ? "text-destructive"
+                  : "text-green-600 dark:text-green-400",
+              )}
+            >
               {dangerMsg}
             </p>
           )}

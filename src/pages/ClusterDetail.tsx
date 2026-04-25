@@ -1,14 +1,26 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import {
-  CheckCircle, Server, Globe, Terminal, Clipboard, Trash2,
-  Copy, Eye, EyeOff,
+  CheckCircle,
+  Server,
+  Globe,
+  Terminal,
+  Clipboard,
+  Trash2,
+  Copy,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
-  clusterGet, clusterPhaseEvents, keychainGet,
-  openCmUi, openSshTerminal, clusterEnvVars, destroyStart,
+  clusterGet,
+  clusterPhaseEvents,
+  keychainGet,
+  openCmUi,
+  openSshTerminal,
+  clusterEnvVars,
+  destroyStart,
 } from "@/lib/tauri";
 import { InstallProgress } from "./InstallProgress";
 import type { Cluster, PhaseEvent, TfvarsConfig } from "@/lib/types";
@@ -20,18 +32,21 @@ import { PHASE_DEFS } from "@/lib/types";
 
 function StateBadge({ state }: { state: string }) {
   const cls: Record<string, string> = {
-    draft:      "bg-muted text-muted-foreground",
+    draft: "bg-muted text-muted-foreground",
     installing: "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300",
-    ready:      "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300",
-    failed:     "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300",
-    destroying: "bg-orange-100 text-orange-700 dark:bg-orange-950 dark:text-orange-300",
-    destroyed:  "bg-muted text-muted-foreground",
+    ready: "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300",
+    failed: "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300",
+    destroying:
+      "bg-orange-100 text-orange-700 dark:bg-orange-950 dark:text-orange-300",
+    destroyed: "bg-muted text-muted-foreground",
   };
   return (
-    <span className={cn(
-      "inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-medium capitalize",
-      cls[state] ?? "bg-muted text-muted-foreground"
-    )}>
+    <span
+      className={cn(
+        "inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-medium capitalize",
+        cls[state] ?? "bg-muted text-muted-foreground",
+      )}
+    >
       {state}
     </span>
   );
@@ -48,17 +63,28 @@ function ageSince(iso: string): string {
 }
 
 const PRICE_MAP: Record<string, number> = {
-  "t3.micro": 0.011, "t3.small": 0.023, "t3.medium": 0.046, "t3.large": 0.091,
-  "m5.large": 0.096, "m5.xlarge": 0.192, "m5.2xlarge": 0.384, "m5.4xlarge": 0.768,
-  "r5.large": 0.126, "r5.xlarge": 0.252, "r5.2xlarge": 0.504, "r5.4xlarge": 1.008,
+  "t3.micro": 0.011,
+  "t3.small": 0.023,
+  "t3.medium": 0.046,
+  "t3.large": 0.091,
+  "m5.large": 0.096,
+  "m5.xlarge": 0.192,
+  "m5.2xlarge": 0.384,
+  "m5.4xlarge": 0.768,
+  "r5.large": 0.126,
+  "r5.xlarge": 0.252,
+  "r5.2xlarge": 0.504,
+  "r5.4xlarge": 1.008,
 };
 function costPerHour(tf: TfvarsConfig): number {
   const p = (t: string) => PRICE_MAP[t] ?? 0.2;
   return (
     tf.master_count * p(tf.master_instance_type) +
     tf.worker_count * p(tf.worker_instance_type) +
-    tf.edge_count   * p(tf.edge_instance_type) +
-    p(tf.bastion_instance_type) + p(tf.ipa_instance_type) + p(tf.util_instance_type)
+    tf.edge_count * p(tf.edge_instance_type) +
+    p(tf.bastion_instance_type) +
+    p(tf.ipa_instance_type) +
+    p(tf.util_instance_type)
   );
 }
 
@@ -82,11 +108,13 @@ function DestroyDialog({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div className="bg-background rounded-xl border border-border shadow-xl p-6 max-w-md w-full mx-4 space-y-4">
         <div className="space-y-1">
-          <h3 className="text-[16px] font-semibold text-destructive">Destroy cluster?</h3>
+          <h3 className="text-[16px] font-semibold text-destructive">
+            Destroy cluster?
+          </h3>
           <p className="text-[13px] text-muted-foreground">
             This will delete <strong>all AWS resources</strong> for cluster{" "}
-            <span className="font-mono font-medium">{name}</span>.
-            Terraform destroy is not reversible.
+            <span className="font-mono font-medium">{name}</span>. Terraform
+            destroy is not reversible.
           </p>
         </div>
         <div className="space-y-1.5">
@@ -103,7 +131,12 @@ function DestroyDialog({
           />
         </div>
         <div className="flex justify-end gap-2">
-          <Button variant="outline" size="sm" onClick={onCancel} disabled={busy}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onCancel}
+            disabled={busy}
+          >
             Cancel
           </Button>
           <Button
@@ -128,10 +161,10 @@ function DestroyDialog({
 const SECRET_KEYS = [
   { key: "PAYWALL_USER", label: "CDP Paywall username" },
   { key: "PAYWALL_PASS", label: "CDP Paywall password" },
-  { key: "DS_PASSWORD",  label: "DS password" },
+  { key: "DS_PASSWORD", label: "DS password" },
   { key: "ADM_PASSWORD", label: "Admin password" },
   { key: "CM_ADMIN_PASSWORD", label: "CM admin password" },
-  { key: "DB_ROOT_PASSWORD",  label: "DB root password" },
+  { key: "DB_ROOT_PASSWORD", label: "DB root password" },
 ] as const;
 
 function SecretsTab({ cluster }: { cluster: Cluster }) {
@@ -140,17 +173,28 @@ function SecretsTab({ cluster }: { cluster: Cluster }) {
   const [copied, setCopied] = useState<string | null>(null);
 
   async function reveal(key: string) {
-    if (revealed[key]) { setRevealed((r) => { const n = { ...r }; delete n[key]; return n; }); return; }
+    if (revealed[key]) {
+      setRevealed((r) => {
+        const n = { ...r };
+        delete n[key];
+        return n;
+      });
+      return;
+    }
     setLoading((l) => ({ ...l, [key]: true }));
     try {
       const value = await keychainGet(cluster.id, key);
       setRevealed((r) => ({ ...r, [key]: value }));
-    } catch { /* ignore */ }
-    finally { setLoading((l) => ({ ...l, [key]: false })); }
+    } catch {
+      /* ignore */
+    } finally {
+      setLoading((l) => ({ ...l, [key]: false }));
+    }
   }
 
   async function copy(key: string) {
-    const value = revealed[key] ?? await keychainGet(cluster.id, key).catch(() => "");
+    const value =
+      revealed[key] ?? (await keychainGet(cluster.id, key).catch(() => ""));
     await navigator.clipboard.writeText(value);
     setCopied(key);
     setTimeout(() => setCopied(null), 1500);
@@ -176,7 +220,11 @@ function SecretsTab({ cluster }: { cluster: Cluster }) {
               title={revealed[key] ? "Hide" : "Reveal"}
               disabled={loading[key]}
             >
-              {revealed[key] ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+              {revealed[key] ? (
+                <EyeOff className="h-3.5 w-3.5" />
+              ) : (
+                <Eye className="h-3.5 w-3.5" />
+              )}
             </button>
             <button
               onClick={() => copy(key)}
@@ -186,7 +234,9 @@ function SecretsTab({ cluster }: { cluster: Cluster }) {
               <Copy className="h-3.5 w-3.5" />
             </button>
             {copied === key && (
-              <span className="text-[10px] text-green-500 self-center">Copied!</span>
+              <span className="text-[10px] text-green-500 self-center">
+                Copied!
+              </span>
             )}
           </div>
         </div>
@@ -203,7 +253,9 @@ function PhaseHistoryTab({ cluster }: { cluster: Cluster }) {
   const [events, setEvents] = useState<PhaseEvent[]>([]);
 
   useEffect(() => {
-    clusterPhaseEvents(cluster.id).then(setEvents).catch(() => {});
+    clusterPhaseEvents(cluster.id)
+      .then(setEvents)
+      .catch(() => {});
   }, [cluster.id]);
 
   const phaseLabel = (key: string) =>
@@ -211,7 +263,9 @@ function PhaseHistoryTab({ cluster }: { cluster: Cluster }) {
 
   if (events.length === 0) {
     return (
-      <p className="text-[13px] text-muted-foreground px-4">No phase events recorded.</p>
+      <p className="text-[13px] text-muted-foreground px-4">
+        No phase events recorded.
+      </p>
     );
   }
 
@@ -219,31 +273,47 @@ function PhaseHistoryTab({ cluster }: { cluster: Cluster }) {
     <div className="space-y-0.5">
       {events.map((ev) => {
         const durationMs = ev.finished_at
-          ? new Date(ev.finished_at).getTime() - new Date(ev.started_at).getTime()
+          ? new Date(ev.finished_at).getTime() -
+            new Date(ev.started_at).getTime()
           : null;
-        const durationStr = durationMs !== null
-          ? durationMs < 60000
-            ? `${(durationMs / 1000).toFixed(0)}s`
-            : `${Math.floor(durationMs / 60000)}m ${Math.floor((durationMs % 60000) / 1000)}s`
-          : null;
+        const durationStr =
+          durationMs !== null
+            ? durationMs < 60000
+              ? `${(durationMs / 1000).toFixed(0)}s`
+              : `${Math.floor(durationMs / 60000)}m ${Math.floor((durationMs % 60000) / 1000)}s`
+            : null;
 
         return (
-          <div key={ev.id} className="flex items-center gap-3 px-4 py-2 text-[13px]">
-            <span className={cn(
-              "inline-flex rounded-full w-2 h-2 flex-shrink-0",
-              ev.status === "success" && "bg-green-500",
-              ev.status === "failed"  && "bg-destructive",
-              ev.status === "running" && "bg-blue-500",
-              ev.status === "interrupted" && "bg-yellow-500",
-              !["success","failed","running","interrupted"].includes(ev.status) && "bg-muted-foreground/40"
-            )} />
+          <div
+            key={ev.id}
+            className="flex items-center gap-3 px-4 py-2 text-[13px]"
+          >
+            <span
+              className={cn(
+                "inline-flex rounded-full w-2 h-2 flex-shrink-0",
+                ev.status === "success" && "bg-green-500",
+                ev.status === "failed" && "bg-destructive",
+                ev.status === "running" && "bg-blue-500",
+                ev.status === "interrupted" && "bg-yellow-500",
+                !["success", "failed", "running", "interrupted"].includes(
+                  ev.status,
+                ) && "bg-muted-foreground/40",
+              )}
+            />
             <span className="flex-1 font-medium">{phaseLabel(ev.phase)}</span>
             {durationStr && (
-              <span className="text-muted-foreground tabular-nums text-[12px]">{durationStr}</span>
+              <span className="text-muted-foreground tabular-nums text-[12px]">
+                {durationStr}
+              </span>
             )}
-            <span className="text-muted-foreground capitalize text-[12px]">{ev.status}</span>
+            <span className="text-muted-foreground capitalize text-[12px]">
+              {ev.status}
+            </span>
             {ev.error_summary && (
-              <span className="text-destructive text-[11px] truncate max-w-[200px]" title={ev.error_summary}>
+              <span
+                className="text-destructive text-[11px] truncate max-w-[200px]"
+                title={ev.error_summary}
+              >
                 {ev.error_summary}
               </span>
             )}
@@ -261,10 +331,15 @@ function PhaseHistoryTab({ cluster }: { cluster: Cluster }) {
 function CostCard({ cluster }: { cluster: Cluster }) {
   if (!cluster.tfvars_json) return null;
   let tf: TfvarsConfig;
-  try { tf = JSON.parse(cluster.tfvars_json); } catch { return null; }
+  try {
+    tf = JSON.parse(cluster.tfvars_json);
+  } catch {
+    return null;
+  }
 
   const hourly = costPerHour(tf);
-  const hrsSince = (Date.now() - new Date(cluster.created_at).getTime()) / 3_600_000;
+  const hrsSince =
+    (Date.now() - new Date(cluster.created_at).getTime()) / 3_600_000;
   const totalSoFar = hourly * hrsSince;
   const monthly = hourly * 730;
 
@@ -283,7 +358,9 @@ function CostCard({ cluster }: { cluster: Cluster }) {
         <span>Monthly projection</span>
         <span className="tabular-nums">${monthly.toFixed(0)}/mo</span>
       </div>
-      <p className="text-[10px] text-muted-foreground/60">On-demand pricing, ap-south-1</p>
+      <p className="text-[10px] text-muted-foreground/60">
+        On-demand pricing, ap-south-1
+      </p>
     </div>
   );
 }
@@ -294,7 +371,13 @@ function CostCard({ cluster }: { cluster: Cluster }) {
 
 type Tab = "overview" | "history" | "secrets";
 
-function ReadyView({ cluster, onClusterChange }: { cluster: Cluster; onClusterChange: (c: Cluster) => void }) {
+function ReadyView({
+  cluster,
+  onClusterChange,
+}: {
+  cluster: Cluster;
+  onClusterChange: (c: Cluster) => void;
+}) {
   const [tab, setTab] = useState<Tab>("overview");
   const [showDestroy, setShowDestroy] = useState(false);
   const [destroying, setDestroying] = useState(false);
@@ -304,28 +387,41 @@ function ReadyView({ cluster, onClusterChange }: { cluster: Cluster; onClusterCh
   const [actionError, setActionError] = useState<string | null>(null);
 
   const tf: TfvarsConfig | null = (() => {
-    try { return cluster.tfvars_json ? JSON.parse(cluster.tfvars_json) : null; }
-    catch { return null; }
+    try {
+      return cluster.tfvars_json ? JSON.parse(cluster.tfvars_json) : null;
+    } catch {
+      return null;
+    }
   })();
 
   const meta: Record<string, string> | null = (() => {
-    try { return cluster.metadata_json ? JSON.parse(cluster.metadata_json) : null; }
-    catch { return null; }
+    try {
+      return cluster.metadata_json ? JSON.parse(cluster.metadata_json) : null;
+    } catch {
+      return null;
+    }
   })();
 
   const domain = tf?.private_dns_domain ?? "cdp.prod.internal";
   const bastionIp = meta?.bastion_public_ip ?? meta?.bastion_ip ?? null;
 
-  async function doAction(fn: () => Promise<void>, setBusy: (b: boolean) => void) {
+  async function doAction(
+    fn: () => Promise<void>,
+    setBusy: (b: boolean) => void,
+  ) {
     setActionError(null);
     setBusy(true);
-    try { await fn(); }
-    catch (e: unknown) {
-      const msg = typeof e === "object" && e !== null && "message" in e
-        ? String((e as { message: unknown }).message) : String(e);
+    try {
+      await fn();
+    } catch (e: unknown) {
+      const msg =
+        typeof e === "object" && e !== null && "message" in e
+          ? String((e as { message: unknown }).message)
+          : String(e);
       setActionError(msg);
+    } finally {
+      setBusy(false);
     }
-    finally { setBusy(false); }
   }
 
   async function confirmDestroy() {
@@ -336,8 +432,10 @@ function ReadyView({ cluster, onClusterChange }: { cluster: Cluster; onClusterCh
       // ClusterDetail will re-render in the destroying state
       onClusterChange(await clusterGet(cluster.id));
     } catch (e: unknown) {
-      const msg = typeof e === "object" && e !== null && "message" in e
-        ? String((e as { message: unknown }).message) : String(e);
+      const msg =
+        typeof e === "object" && e !== null && "message" in e
+          ? String((e as { message: unknown }).message)
+          : String(e);
       setActionError(msg);
     }
     setDestroying(false);
@@ -345,8 +443,8 @@ function ReadyView({ cluster, onClusterChange }: { cluster: Cluster; onClusterCh
 
   const tabs: { id: Tab; label: string }[] = [
     { id: "overview", label: "Overview" },
-    { id: "history",  label: "Phase history" },
-    { id: "secrets",  label: "Secrets" },
+    { id: "history", label: "Phase history" },
+    { id: "secrets", label: "Secrets" },
   ];
 
   return (
@@ -371,7 +469,11 @@ function ReadyView({ cluster, onClusterChange }: { cluster: Cluster; onClusterCh
             variant="outline"
             size="sm"
             disabled={cmBusy || !bastionIp}
-            title={!bastionIp ? "Bastion IP not yet available (terraform output not captured)" : undefined}
+            title={
+              !bastionIp
+                ? "Bastion IP not yet available (terraform output not captured)"
+                : undefined
+            }
             onClick={() => doAction(() => openCmUi(cluster.id), setCmBusy)}
           >
             <Globe className="h-3.5 w-3.5 mr-1.5" />
@@ -382,7 +484,9 @@ function ReadyView({ cluster, onClusterChange }: { cluster: Cluster; onClusterCh
             size="sm"
             disabled={sshBusy || !bastionIp}
             title={!bastionIp ? "Bastion IP not yet available" : undefined}
-            onClick={() => doAction(() => openSshTerminal(cluster.id), setSshBusy)}
+            onClick={() =>
+              doAction(() => openSshTerminal(cluster.id), setSshBusy)
+            }
           >
             <Terminal className="h-3.5 w-3.5 mr-1.5" />
             SSH to bastion
@@ -396,8 +500,11 @@ function ReadyView({ cluster, onClusterChange }: { cluster: Cluster; onClusterCh
               try {
                 const text = await clusterEnvVars(cluster.id);
                 await navigator.clipboard.writeText(text);
-              } catch { /* ignore */ }
-              finally { setCopyBusy(false); }
+              } catch {
+                /* ignore */
+              } finally {
+                setCopyBusy(false);
+              }
             }}
           >
             <Clipboard className="h-3.5 w-3.5 mr-1.5" />
@@ -428,7 +535,7 @@ function ReadyView({ cluster, onClusterChange }: { cluster: Cluster; onClusterCh
               "px-3 py-1.5 text-[13px] font-medium rounded-t transition-colors -mb-px border-b-2",
               tab === t.id
                 ? "border-primary text-primary"
-                : "border-transparent text-muted-foreground hover:text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground",
             )}
           >
             {t.label}
@@ -444,17 +551,27 @@ function ReadyView({ cluster, onClusterChange }: { cluster: Cluster; onClusterCh
             <div className="rounded-lg border border-border/50 divide-y divide-border/50 text-[13px]">
               {[
                 ["Cluster ID", cluster.id],
-                ["Domain",     domain],
+                ["Domain", domain],
                 ["Util1 host", `util1.${domain}`],
                 ["Bastion IP", bastionIp ?? "(available after install)"],
-                ["Repo path",  cluster.repo_path],
-                ["Created",    new Date(cluster.created_at).toLocaleString()],
-                ["Workers",    tf ? `${tf.worker_count} × ${tf.worker_instance_type}` : "—"],
-                ["Masters",    tf ? `${tf.master_count} × ${tf.master_instance_type}` : "—"],
+                ["Repo path", cluster.repo_path],
+                ["Created", new Date(cluster.created_at).toLocaleString()],
+                [
+                  "Workers",
+                  tf ? `${tf.worker_count} × ${tf.worker_instance_type}` : "—",
+                ],
+                [
+                  "Masters",
+                  tf ? `${tf.master_count} × ${tf.master_instance_type}` : "—",
+                ],
               ].map(([label, value]) => (
                 <div key={label} className="flex px-4 py-2.5 gap-4">
-                  <span className="w-28 text-muted-foreground flex-shrink-0">{label}</span>
-                  <span className="font-mono text-[12px] break-all">{value}</span>
+                  <span className="w-28 text-muted-foreground flex-shrink-0">
+                    {label}
+                  </span>
+                  <span className="font-mono text-[12px] break-all">
+                    {value}
+                  </span>
                 </div>
               ))}
             </div>
@@ -490,21 +607,28 @@ export default function ClusterDetail() {
 
   const load = useCallback(async () => {
     if (!id) return;
-    try { setCluster(await clusterGet(id)); }
-    catch (e: unknown) {
+    try {
+      setCluster(await clusterGet(id));
+    } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     }
   }, [id]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
   if (error) {
     return (
-      <div className="p-8 text-[13px] text-destructive">Failed to load cluster: {error}</div>
+      <div className="p-8 text-[13px] text-destructive">
+        Failed to load cluster: {error}
+      </div>
     );
   }
   if (!cluster) {
-    return <div className="p-8 text-[13px] text-muted-foreground">Loading…</div>;
+    return (
+      <div className="p-8 text-[13px] text-muted-foreground">Loading…</div>
+    );
   }
 
   const { state } = cluster;
@@ -523,7 +647,12 @@ export default function ClusterDetail() {
         <div className="text-center space-y-1">
           <Server className="h-8 w-8 mx-auto opacity-30" />
           <p className="font-medium">{cluster.name}</p>
-          <p>Destroyed {cluster.destroyed_at ? new Date(cluster.destroyed_at).toLocaleString() : ""}</p>
+          <p>
+            Destroyed{" "}
+            {cluster.destroyed_at
+              ? new Date(cluster.destroyed_at).toLocaleString()
+              : ""}
+          </p>
         </div>
       </div>
     );

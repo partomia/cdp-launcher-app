@@ -8,7 +8,10 @@ import type {
   PhaseEvent,
 } from "./types";
 
-async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+async function call<T>(
+  cmd: string,
+  args?: Record<string, unknown>,
+): Promise<T> {
   return invoke<T>(cmd, args);
 }
 
@@ -16,8 +19,11 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
 // Keychain
 // ---------------------------------------------------------------------------
 
-export const keychainSet = (clusterId: string, key: string, value: string): Promise<void> =>
-  call("keychain_set", { clusterId, key, value });
+export const keychainSet = (
+  clusterId: string,
+  key: string,
+  value: string,
+): Promise<void> => call("keychain_set", { clusterId, key, value });
 
 export const keychainGet = (clusterId: string, key: string): Promise<string> =>
   call("keychain_get", { clusterId, key });
@@ -34,13 +40,19 @@ export const keychainDeleteAllForCluster = (clusterId: string): Promise<void> =>
 
 export const awsProfileList = (): Promise<string[]> => call("aws_profile_list");
 
-export const awsCallerIdentity = (profile: string, region: string): Promise<CallerIdentity> =>
-  call("aws_caller_identity", { profile, region });
+export const awsCallerIdentity = (
+  profile: string,
+  region: string,
+): Promise<CallerIdentity> => call("aws_caller_identity", { profile, region });
 
-export const awsCheckKeyPair = (profile: string, region: string, keyName: string): Promise<boolean> =>
-  call("aws_check_key_pair", { profile, region, keyName });
+export const awsCheckKeyPair = (
+  profile: string,
+  region: string,
+  keyName: string,
+): Promise<boolean> => call("aws_check_key_pair", { profile, region, keyName });
 
-export const awsDetectPublicIp = (): Promise<string> => call("aws_detect_public_ip");
+export const awsDetectPublicIp = (): Promise<string> =>
+  call("aws_detect_public_ip");
 
 // ---------------------------------------------------------------------------
 // Clusters
@@ -48,7 +60,8 @@ export const awsDetectPublicIp = (): Promise<string> => call("aws_detect_public_
 
 export const clusterList = (): Promise<Cluster[]> => call("cluster_list");
 
-export const clusterGet = (id: string): Promise<Cluster> => call("cluster_get", { id });
+export const clusterGet = (id: string): Promise<Cluster> =>
+  call("cluster_get", { id });
 
 export const clusterCreate = (input: ClusterCreateInput): Promise<Cluster> =>
   call("cluster_create", { input });
@@ -76,14 +89,16 @@ export const logsFetch = (
   clusterId: string,
   phase: string,
   offset: number,
-  limit: number
-): Promise<LogLine[]> => call("logs_fetch", { clusterId, phase, offset, limit });
+  limit: number,
+): Promise<LogLine[]> =>
+  call("logs_fetch", { clusterId, phase, offset, limit });
 
 // ---------------------------------------------------------------------------
 // Settings
 // ---------------------------------------------------------------------------
 
-export const settingsGet = (): Promise<Record<string, string>> => call("settings_get");
+export const settingsGet = (): Promise<Record<string, string>> =>
+  call("settings_get");
 export const settingsSet = (key: string, value: string): Promise<void> =>
   call("settings_set", { key, value });
 
@@ -92,7 +107,8 @@ export const settingsSet = (key: string, value: string): Promise<void> =>
 // ---------------------------------------------------------------------------
 
 export const forgetAllSecrets = (): Promise<void> => call("forget_all_secrets");
-export const deleteAllClusters = (): Promise<void> => call("delete_all_clusters");
+export const deleteAllClusters = (): Promise<void> =>
+  call("delete_all_clusters");
 
 // ---------------------------------------------------------------------------
 // Cluster UI actions
@@ -107,11 +123,20 @@ export const openCmUi = (clusterId: string): Promise<void> =>
 export const openSshTerminal = (clusterId: string): Promise<void> =>
   call("open_ssh_terminal", { clusterId });
 
-export const runRemediation = (clusterId: string, command: string): Promise<void> =>
-  call("run_remediation", { clusterId, command });
+export const runRemediation = (
+  clusterId: string,
+  command: string,
+): Promise<void> => call("run_remediation", { clusterId, command });
 
 // ---------------------------------------------------------------------------
 // Re-exports
 // ---------------------------------------------------------------------------
 
-export type { AppError, CallerIdentity, Cluster, ClusterCreateInput, LogLine, PhaseEvent };
+export type {
+  AppError,
+  CallerIdentity,
+  Cluster,
+  ClusterCreateInput,
+  LogLine,
+  PhaseEvent,
+};

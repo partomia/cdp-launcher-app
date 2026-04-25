@@ -165,17 +165,17 @@ export interface ClusterMetadata {
 }
 
 export const PHASE_DEFS = [
-  { key: "tfvars",          label: "Write tfvars" },
-  { key: "terraform_init",  label: "Terraform Init" },
-  { key: "terraform_plan",  label: "Terraform Plan" },
+  { key: "tfvars", label: "Write tfvars" },
+  { key: "terraform_init", label: "Terraform Init" },
+  { key: "terraform_plan", label: "Terraform Plan" },
   { key: "terraform_apply", label: "Terraform Apply" },
-  { key: "make_inventory",  label: "Generate Inventory" },
-  { key: "make_ping",       label: "Ping Hosts" },
-  { key: "make_bootstrap",  label: "Bootstrap" },
-  { key: "make_prereq",     label: "Prerequisites" },
-  { key: "make_freeipa",    label: "FreeIPA" },
-  { key: "make_databases",  label: "Databases" },
-  { key: "make_cm",         label: "Cloudera Manager" },
+  { key: "make_inventory", label: "Generate Inventory" },
+  { key: "make_ping", label: "Ping Hosts" },
+  { key: "make_bootstrap", label: "Bootstrap" },
+  { key: "make_prereq", label: "Prerequisites" },
+  { key: "make_freeipa", label: "FreeIPA" },
+  { key: "make_databases", label: "Databases" },
+  { key: "make_cm", label: "Cloudera Manager" },
 ] as const;
 
-export type PhaseKey = typeof PHASE_DEFS[number]["key"];
+export type PhaseKey = (typeof PHASE_DEFS)[number]["key"];

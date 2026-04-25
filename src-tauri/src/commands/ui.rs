@@ -42,7 +42,7 @@ pub fn forget_all_secrets(store: State<'_, Arc<Store>>) -> Result<(), AppError> 
             "CM_ADMIN_PASSWORD",
             "DB_ROOT_PASSWORD",
         ] {
-            let account = format!("{}/{key}", cluster.id);
+            let account = format!("{}:{key}", cluster.id);
             if let Ok(entry) = keyring::Entry::new(service, &account) {
                 let _ = entry.delete_password();
             }
@@ -75,7 +75,7 @@ pub fn cluster_env_vars(
     ];
     let mut lines = vec![format!("# CDP env vars for cluster {cluster_id}")];
     for key in &keys {
-        let account = format!("{cluster_id}/{key}");
+        let account = format!("{cluster_id}:{key}");
         let entry = keyring::Entry::new("com.partomia.cdp-launcher", &account)
             .map_err(|e| AppError::Keychain(e.to_string()))?;
         let value = entry.get_password().unwrap_or_else(|_| "<not set>".to_string());
@@ -152,7 +152,7 @@ pub async fn open_cm_ui(
             &format!("ec2-user@{bastion_ip}"),
         ])
         .spawn()
-        .map_err(|e| AppError::Io(e))?;
+        .map_err(AppError::Io)?;
 
     // Give the tunnel a moment to establish
     tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
@@ -185,7 +185,7 @@ pub fn open_ssh_terminal(
         .arg("-e")
         .arg(&script)
         .spawn()
-        .map_err(|e| AppError::Io(e))?;
+        .map_err(AppError::Io)?;
     Ok(())
 }
 
