@@ -46,12 +46,20 @@ impl RunnerState {
         self.pids.lock().unwrap().remove(cluster_id);
     }
 
-    /// Send SIGTERM to the running process for this cluster.
+    /// Send SIGTERM to the running process AND its entire process group for this cluster.
+    /// Killing the process group ensures that make's ansible-playbook children also
+    /// receive the signal — otherwise they become orphans when the app restarts.
     /// Returns false if no process is registered.
     pub fn cancel(&self, cluster_id: &str) -> bool {
         if let Some(&pid) = self.pids.lock().unwrap().get(cluster_id) {
-            tracing::info!("sending SIGTERM to PID {pid} for cluster {cluster_id}");
-            unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
+            tracing::info!("sending SIGTERM to PID {pid} (+ process group) for cluster {cluster_id}");
+            unsafe {
+                // Negative PID sends to the entire process group (make + ansible-playbook children).
+                // The PTY session makes the child the group leader, so pgid == pid.
+                libc::kill(-(pid as libc::pid_t), libc::SIGTERM);
+                // Also signal the process directly in case it somehow isn't a group leader.
+                libc::kill(pid as libc::pid_t, libc::SIGTERM);
+            };
             true
         } else {
             false
