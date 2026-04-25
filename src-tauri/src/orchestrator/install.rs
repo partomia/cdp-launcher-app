@@ -123,8 +123,17 @@ async fn run_install_inner(ctx: InstallCtx) -> Result<(), AppError> {
 
     let tf_dir = ctx.repo_path.join("terraform");
 
-    // Base env for all commands
+    // Base env for all commands.
+    // When launched from the macOS .app bundle (Finder/Dock), PATH is minimal
+    // (/usr/bin:/bin:/usr/sbin:/sbin) and doesn't include Homebrew or pyenv.
+    // Prepend the common tool paths so make, ansible-playbook, terraform, etc.
+    // are all resolvable regardless of how the app was opened.
+    let inherited_path = std::env::var("PATH").unwrap_or_default();
+    let tool_paths = "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin";
+    let full_path = format!("{tool_paths}:{inherited_path}");
+
     let mut base_env = HashMap::new();
+    base_env.insert("PATH".into(), full_path);
     base_env.insert("AWS_PROFILE".into(), ctx.aws_profile.clone());
     base_env.insert("AWS_DEFAULT_REGION".into(), ctx.aws_region.clone());
 
