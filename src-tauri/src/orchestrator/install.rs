@@ -87,6 +87,29 @@ pub async fn run_install(ctx: InstallCtx) {
     }
 }
 
+/// Kill any ansible-playbook / make processes left over from a previous app session.
+/// These become orphans when the app restarts mid-install and cause concurrent run
+/// conflicts on the next resume because the new RunnerState starts empty.
+fn kill_orphaned_ansible_processes(repo_path: &std::path::Path) {
+    // Match any ansible-playbook that references our repo's playbook directory.
+    // Using the repo path as the distinguishing token avoids killing unrelated Ansible runs.
+    let pb_dir = repo_path.join("ansible").join("playbooks");
+    let pb_str = pb_dir.to_string_lossy().into_owned();
+
+    for pattern in &[pb_str.as_str(), "make prereq", "make bootstrap", "make freeipa", "make databases", "make cm"] {
+        let _ = std::process::Command::new("pkill")
+            .args(["-f", pattern])
+            .status();
+    }
+
+    // Clean up any stale ControlMaster sockets so the next run starts fresh.
+    let _ = std::process::Command::new("sh")
+        .args(["-c", "rm -f /tmp/ansible-ssh-* /tmp/ansible-ctrl/* 2>/dev/null; true"])
+        .status();
+
+    tracing::info!("killed orphaned ansible processes (if any) and cleaned ControlMaster sockets");
+}
+
 async fn run_install_inner(ctx: InstallCtx) -> Result<(), AppError> {
     let tfvars_path = ctx.repo_path.join("terraform").join("terraform.tfvars");
 
@@ -120,6 +143,11 @@ async fn run_install_inner(ctx: InstallCtx) -> Result<(), AppError> {
         "ANSIBLE_INVENTORY".into(),
         ansible_inv.to_string_lossy().into_owned(),
     );
+
+    // Kill any ansible-playbook processes left over from a previous app session
+    // before we touch the cluster state. This prevents concurrent-run conflicts
+    // when the user resumes after an app crash or restart.
+    kill_orphaned_ansible_processes(&ctx.repo_path);
 
     ctx.store.update_cluster_state(&ctx.cluster_id, "installing")?;
 
