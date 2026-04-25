@@ -82,8 +82,27 @@ pub struct InstallCtx {
 // ---------------------------------------------------------------------------
 
 pub async fn run_install(ctx: InstallCtx) {
+    // Keep references alive before ctx is moved into run_install_inner.
+    let app = ctx.app.clone();
+    let store = Arc::clone(&ctx.store);
+    let cluster_id = ctx.cluster_id.clone();
+
     if let Err(e) = run_install_inner(ctx).await {
         tracing::error!("install failed: {e}");
+        // Surface the error to the frontend log pane so it's visible
+        // even when the app is launched as a bundle (no terminal stderr).
+        let _ = app.emit(
+            "log-line",
+            &serde_json::json!({
+                "cluster_id": cluster_id,
+                "phase": "orchestrator",
+                "stream": "pty",
+                "line": format!("[ORCHESTRATOR ERROR] {e}"),
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+            }),
+        );
+        // Reset cluster to failed so Resume Install becomes clickable again.
+        let _ = store.update_cluster_state(&cluster_id, "failed");
     }
 }
 
