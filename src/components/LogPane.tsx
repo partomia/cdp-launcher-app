@@ -33,7 +33,10 @@ export function LogPane({ clusterId, phase, isActive }: Props) {
 
   // Load historical lines when phase changes
   useEffect(() => {
-    if (!phase) { setLines([]); return; }
+    if (!phase) {
+      setLines([]);
+      return;
+    }
     setLines([]);
     logsFetch(clusterId, phase, 0, MAX_BUFFER)
       .then(setLines)
@@ -49,10 +52,16 @@ export function LogPane({ clusterId, phase, isActive }: Props) {
       if (ll.cluster_id !== clusterId || ll.phase !== phase) return;
       setLines((prev) => {
         const next = [...prev, ll];
-        return next.length > MAX_BUFFER ? next.slice(next.length - MAX_BUFFER) : next;
+        return next.length > MAX_BUFFER
+          ? next.slice(next.length - MAX_BUFFER)
+          : next;
       });
-    }).then((fn) => { unlisten = fn; });
-    return () => { unlisten?.(); };
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => {
+      unlisten?.();
+    };
   }, [clusterId, phase, isActive]);
 
   // Filter by search
@@ -119,16 +128,31 @@ export function LogPane({ clusterId, phase, isActive }: Props) {
           {filtered.length.toLocaleString()} lines
         </span>
         <button
-          onClick={() => { setAutoScroll(true); if (parentRef.current) parentRef.current.scrollTop = parentRef.current.scrollHeight; }}
-          className={cn("p-1 rounded hover:bg-accent", autoScroll && "text-primary")}
+          onClick={() => {
+            setAutoScroll(true);
+            if (parentRef.current)
+              parentRef.current.scrollTop = parentRef.current.scrollHeight;
+          }}
+          className={cn(
+            "p-1 rounded hover:bg-accent",
+            autoScroll && "text-primary",
+          )}
           title="Auto-scroll"
         >
           <ArrowDownToLine className="h-3.5 w-3.5" />
         </button>
-        <button onClick={copyToClipboard} className="p-1 rounded hover:bg-accent" title="Copy to clipboard">
+        <button
+          onClick={copyToClipboard}
+          className="p-1 rounded hover:bg-accent"
+          title="Copy to clipboard"
+        >
           <Copy className="h-3.5 w-3.5" />
         </button>
-        <button onClick={saveToFile} className="p-1 rounded hover:bg-accent" title="Save to file">
+        <button
+          onClick={saveToFile}
+          className="p-1 rounded hover:bg-accent"
+          title="Save to file"
+        >
           <Download className="h-3.5 w-3.5" />
         </button>
       </div>
@@ -140,7 +164,10 @@ export function LogPane({ clusterId, phase, isActive }: Props) {
         className="flex-1 overflow-auto font-mono text-[11px] leading-5"
       >
         <div
-          style={{ height: `${rowVirtualizer.getTotalSize()}px`, position: "relative" }}
+          style={{
+            height: `${rowVirtualizer.getTotalSize()}px`,
+            position: "relative",
+          }}
         >
           {rowVirtualizer.getVirtualItems().map((vrow) => {
             const ll = filtered[vrow.index];
@@ -157,9 +184,12 @@ export function LogPane({ clusterId, phase, isActive }: Props) {
                 }}
                 className={cn(
                   "px-3 whitespace-pre-wrap break-all",
-                  isErr ? "text-red-400 dark:text-red-400" : "text-foreground/80",
-                  search && ll.line.toLowerCase().includes(search.toLowerCase()) &&
-                    "bg-yellow-100/30 dark:bg-yellow-900/20"
+                  isErr
+                    ? "text-red-400 dark:text-red-400"
+                    : "text-foreground/80",
+                  search &&
+                    ll.line.toLowerCase().includes(search.toLowerCase()) &&
+                    "bg-yellow-100/30 dark:bg-yellow-900/20",
                 )}
               >
                 {ll.line}

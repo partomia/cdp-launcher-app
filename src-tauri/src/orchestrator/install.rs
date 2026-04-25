@@ -125,6 +125,23 @@ async fn run_install_inner(ctx: InstallCtx) -> Result<(), AppError> {
 
     for &phase in Phase::all() {
         let phase_key = phase.key();
+
+        // Skip phases that already completed successfully in a prior run.
+        if ctx.store.phase_succeeded(&ctx.cluster_id, phase_key)? {
+            tracing::info!("skipping phase {phase_key} — already succeeded");
+            let _ = ctx.app.emit(
+                "log-line",
+                &serde_json::json!({
+                    "cluster_id": ctx.cluster_id,
+                    "phase": phase_key,
+                    "stream": "pty",
+                    "line": "[skipped — already completed successfully]",
+                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                }),
+            );
+            continue;
+        }
+
         let now = chrono::Utc::now().to_rfc3339();
 
         tracing::info!("starting phase: {phase_key}");

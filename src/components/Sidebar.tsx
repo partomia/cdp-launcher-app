@@ -19,9 +19,18 @@ export function Sidebar() {
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (!e.metaKey) return;
-      if (e.key === "1") { e.preventDefault(); navigate("/"); }
-      if (e.key === "n") { e.preventDefault(); navigate("/install"); }
-      if (e.key === ",") { e.preventDefault(); navigate("/settings"); }
+      if (e.key === "1") {
+        e.preventDefault();
+        navigate("/");
+      }
+      if (e.key === "n") {
+        e.preventDefault();
+        navigate("/install");
+      }
+      if (e.key === ",") {
+        e.preventDefault();
+        navigate("/settings");
+      }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -55,7 +64,7 @@ export function Sidebar() {
                 "flex items-center gap-3 rounded-md px-3 py-2 text-[13px] font-medium transition-colors",
                 isActive
                   ? "bg-primary/10 text-primary"
-                  : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                  : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
               )
             }
           >
@@ -73,7 +82,11 @@ export function Sidebar() {
         <button
           onClick={toggleTheme}
           className="flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
-          title={resolvedTheme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+          title={
+            resolvedTheme === "dark"
+              ? "Switch to light mode"
+              : "Switch to dark mode"
+          }
         >
           {resolvedTheme === "dark" ? (
             <Sun className="h-4 w-4" />

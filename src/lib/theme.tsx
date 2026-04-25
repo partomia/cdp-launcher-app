@@ -12,7 +12,9 @@ interface ThemeContextValue {
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 function getSystemTheme(): ResolvedTheme {
-  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  return window.matchMedia("(prefers-color-scheme: dark)").matches
+    ? "dark"
+    : "light";
 }
 
 function applyTheme(theme: Theme) {
@@ -23,10 +25,10 @@ function applyTheme(theme: Theme) {
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = useState<Theme>(
-    () => (localStorage.getItem("cdp-theme") as Theme) ?? "system"
+    () => (localStorage.getItem("cdp-theme") as Theme) ?? "system",
   );
-  const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>(
-    () => (theme === "system" ? getSystemTheme() : theme)
+  const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>(() =>
+    theme === "system" ? getSystemTheme() : theme,
   );
 
   useEffect(() => {
