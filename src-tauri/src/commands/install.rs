@@ -122,20 +122,39 @@ pub async fn scale_start(
 
     let cluster = store.get_cluster(&cluster_id)?;
 
-    // Validate: new count must be greater than current (for fresh scale only)
-    if new_worker_count > 0 {
-        let current: u32 = cluster
-            .tfvars_json
-            .as_deref()
-            .and_then(|j| serde_json::from_str::<serde_json::Value>(j).ok())
-            .and_then(|v| v["worker_count"].as_u64())
-            .unwrap_or(0) as u32;
-        if new_worker_count <= current {
+    // Parse the pre-scale worker count from tfvars
+    let current_worker_count: u32 = cluster
+        .tfvars_json
+        .as_deref()
+        .and_then(|j| serde_json::from_str::<serde_json::Value>(j).ok())
+        .and_then(|v| v["worker_count"].as_u64())
+        .unwrap_or(0) as u32;
+
+    let old_worker_count: u32 = if new_worker_count > 0 {
+        // Fresh scale — validate and persist the pre-scale count so resume can find it
+        if new_worker_count <= current_worker_count {
             return Err(AppError::Other(format!(
-                "new_worker_count ({new_worker_count}) must be greater than current ({current})"
+                "new_worker_count ({new_worker_count}) must be greater than current ({current_worker_count})"
             )));
         }
-    }
+        // Store old count in metadata_json so it survives app restart / resume
+        let mut meta: serde_json::Value = cluster
+            .metadata_json
+            .as_deref()
+            .and_then(|j| serde_json::from_str(j).ok())
+            .unwrap_or(serde_json::json!({}));
+        meta["scale_old_worker_count"] = current_worker_count.into();
+        store.update_cluster_metadata(&cluster_id, &meta.to_string())?;
+        current_worker_count
+    } else {
+        // Resume — read the persisted pre-scale count from metadata_json
+        cluster
+            .metadata_json
+            .as_deref()
+            .and_then(|j| serde_json::from_str::<serde_json::Value>(j).ok())
+            .and_then(|v| v["scale_old_worker_count"].as_u64())
+            .unwrap_or(0) as u32
+    };
 
     let data_dir = app_data_dir()?;
     let log_dir = data_dir.join("logs");
@@ -150,6 +169,7 @@ pub async fn scale_start(
         aws_region: cluster.aws_region,
         log_dir,
         new_worker_count,
+        old_worker_count,
     };
 
     tokio::spawn(run_scale(ctx));

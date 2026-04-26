@@ -11,6 +11,58 @@ use crate::runner::RunnerState;
 use crate::state::Store;
 
 // ---------------------------------------------------------------------------
+// Inventory helpers
+// ---------------------------------------------------------------------------
+
+/// Parse `ansible/inventory/prod.ini` and return the hostnames of workers
+/// whose numeric index is greater than `old_count`.  For example, if
+/// old_count=5 and the inventory now contains worker1..worker6, this returns
+/// ["worker6.cdp.prod.internal"].  The limit is used as ANS_LIMIT so ansible
+/// only touches the newly provisioned nodes.
+fn new_worker_hostnames(inventory_path: &std::path::Path, old_count: u32) -> Vec<String> {
+    let content = match std::fs::read_to_string(inventory_path) {
+        Ok(c) => c,
+        Err(_) => return vec![],
+    };
+
+    let mut in_workers = false;
+    let mut workers: Vec<(u32, String)> = vec![];
+
+    for line in content.lines() {
+        let line = line.trim();
+        if line == "[workers]" {
+            in_workers = true;
+            continue;
+        }
+        if line.starts_with('[') {
+            in_workers = false;
+            continue;
+        }
+        if in_workers && !line.is_empty() && !line.starts_with('#') {
+            if let Some(hostname) = line.split_whitespace().next() {
+                // "worker6.cdp.prod.internal" → numeric prefix "6"
+                let idx: u32 = hostname
+                    .split('.')
+                    .next()
+                    .and_then(|s| {
+                        let digits: String = s.chars().skip_while(|c| c.is_alphabetic()).collect();
+                        digits.parse().ok()
+                    })
+                    .unwrap_or(0);
+                workers.push((idx, hostname.to_string()));
+            }
+        }
+    }
+
+    workers.sort_by_key(|(idx, _)| *idx);
+    workers
+        .into_iter()
+        .filter(|(idx, _)| *idx > old_count)
+        .map(|(_, host)| host)
+        .collect()
+}
+
+// ---------------------------------------------------------------------------
 // Scale phases — order is the scale-out sequence
 // ---------------------------------------------------------------------------
 
@@ -69,6 +121,8 @@ pub struct ScaleCtx {
     pub log_dir: PathBuf,
     /// 0 = resume (no tfvars update); >0 = target worker count
     pub new_worker_count: u32,
+    /// Worker count before the scale started — used to identify new nodes in inventory
+    pub old_worker_count: u32,
 }
 
 // ---------------------------------------------------------------------------
@@ -136,6 +190,13 @@ async fn run_scale_inner(ctx: ScaleCtx) -> Result<(), AppError> {
 
     ctx.store.update_cluster_state(&ctx.cluster_id, "scaling")?;
     let _ = ctx.app.emit("scale-started", &ctx.cluster_id);
+
+    let inventory_path = ctx.repo_path.join("ansible").join("inventory").join("prod.ini");
+
+    // ANS_LIMIT for phases that must only touch new nodes.
+    // Populated after ScaleInventory regenerates prod.ini; until then None.
+    // Falls back to "workers" group if inventory parsing finds nothing (edge case).
+    let mut new_worker_limit: Option<String> = None;
 
     for &phase in ScalePhase::all() {
         let phase_key = phase.key();
@@ -232,50 +293,57 @@ async fn run_scale_inner(ctx: ScaleCtx) -> Result<(), AppError> {
             }
 
             // ----------------------------------------------------------------
-            // Ping all hosts — verify new nodes are reachable
+            // Ping — verify only the new node(s) are reachable
             // ----------------------------------------------------------------
             ScalePhase::ScalePing => {
+                let limit = new_worker_limit.as_deref().unwrap_or("workers");
+                let mut env = base_env.clone();
+                env.insert("ANS_LIMIT".into(), limit.to_string());
                 run_phase(
                     &ctx.app, &ctx.cluster_id, &ctx.runner, &ctx.log_dir,
                     phase_key, ctx.repo_path.clone(), "make",
                     &["ping"],
-                    base_env.clone(),
+                    env,
                 ).await?
             }
 
             // ----------------------------------------------------------------
-            // Bootstrap /etc/cdp-env on new nodes (idempotent on existing)
+            // Bootstrap /etc/cdp-env on new node(s) only
             // ----------------------------------------------------------------
             ScalePhase::ScaleBootstrap => {
+                let limit = new_worker_limit.as_deref().unwrap_or("workers");
+                let mut env = base_env.clone();
+                env.insert("ANS_LIMIT".into(), limit.to_string());
                 run_phase(
                     &ctx.app, &ctx.cluster_id, &ctx.runner, &ctx.log_dir,
                     phase_key, ctx.repo_path.clone(), "make",
                     &["bootstrap"],
-                    base_env.clone(),
+                    env,
                 ).await?
             }
 
             // ----------------------------------------------------------------
-            // OS prerequisites on new workers (idempotent on existing)
+            // OS prerequisites on new node(s) only — never touch existing workers
             // ----------------------------------------------------------------
             ScalePhase::ScalePrereq => {
+                let limit = new_worker_limit.as_deref().unwrap_or("workers");
+                let mut env = base_env.clone();
+                env.insert("ANS_LIMIT".into(), limit.to_string());
                 run_phase(
                     &ctx.app, &ctx.cluster_id, &ctx.runner, &ctx.log_dir,
                     phase_key, ctx.repo_path.clone(), "make",
                     &["prereq"],
-                    base_env.clone(),
+                    env,
                 ).await?
             }
 
             // ----------------------------------------------------------------
-            // Install CM agents on new worker nodes (--limit workers is
-            // idempotent — existing agents are verified, new ones installed)
+            // Install CM agents on new node(s) only
             // ----------------------------------------------------------------
             ScalePhase::ScaleCmAgents => {
+                let limit = new_worker_limit.as_deref().unwrap_or("workers");
                 let mut env = base_env.clone();
-                // ANS_LIMIT=workers tells make cm to restrict the ansible play
-                // to the workers group, skipping masters/edge/util/ipa
-                env.insert("ANS_LIMIT".into(), "workers".into());
+                env.insert("ANS_LIMIT".into(), limit.to_string());
                 run_phase(
                     &ctx.app, &ctx.cluster_id, &ctx.runner, &ctx.log_dir,
                     phase_key, ctx.repo_path.clone(), "make",
@@ -290,6 +358,31 @@ async fn run_scale_inner(ctx: ScaleCtx) -> Result<(), AppError> {
         if exit_code == 0 {
             ctx.store.finish_phase_event(event_id, "success", &finished_at, exit_code, None)?;
             tracing::info!("scale: phase {phase_key} succeeded");
+
+            // After inventory is regenerated, identify the new worker hostnames.
+            // These are used as ANS_LIMIT for all subsequent ansible phases so
+            // that we only touch the new node(s), not the entire cluster.
+            if phase == ScalePhase::ScaleInventory {
+                let new_hosts = new_worker_hostnames(&inventory_path, ctx.old_worker_count);
+                if new_hosts.is_empty() {
+                    tracing::warn!("scale: could not identify new worker hostnames — falling back to ANS_LIMIT=workers");
+                    new_worker_limit = Some("workers".to_string());
+                } else {
+                    let limit = new_hosts.join(",");
+                    tracing::info!("scale: new worker hosts = {limit}");
+                    let _ = ctx.app.emit(
+                        "log-line",
+                        &serde_json::json!({
+                            "cluster_id": ctx.cluster_id,
+                            "phase": phase_key,
+                            "stream": "pty",
+                            "line": format!("[scale] targeting new node(s): {limit}"),
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                        }),
+                    );
+                    new_worker_limit = Some(limit);
+                }
+            }
         } else {
             let summary = format!("exited with code {exit_code}");
             ctx.store.finish_phase_event(
