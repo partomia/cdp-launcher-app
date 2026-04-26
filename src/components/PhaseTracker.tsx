@@ -9,7 +9,7 @@ import {
 import { cn } from "@/lib/utils";
 import { clusterPhaseEvents } from "@/lib/tauri";
 import type { PhaseEvent } from "@/lib/types";
-import { PHASE_DEFS } from "@/lib/types";
+import { PHASE_DEFS, SCALE_PHASE_LABELS } from "@/lib/types";
 
 interface Props {
   clusterId: string;
@@ -96,6 +96,7 @@ export function PhaseTracker({
   const EXTRA_LABELS: Record<string, string> = {
     make_tf_destroy: "Terraform Destroy",
     remediation: "Remediation",
+    ...SCALE_PHASE_LABELS,
   };
 
   function PhaseRow({

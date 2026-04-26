@@ -51,10 +51,11 @@ pub fn run() {
             cluster::cluster_create,
             cluster::cluster_delete_metadata,
             cluster::cluster_phase_events,
-            // Install / destroy orchestration
+            // Install / destroy / scale orchestration
             install::install_start,
             install::install_cancel,
             install::destroy_start,
+            install::scale_start,
             install::logs_fetch,
             // License
             license::license_info,

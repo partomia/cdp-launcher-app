@@ -7,6 +7,7 @@ use crate::error::AppError;
 use crate::orchestrator::{
     destroy::{run_destroy, DestroyCtx},
     install::{run_install, InstallCtx},
+    scale::{run_scale, ScaleCtx},
 };
 use crate::runner::{LogLine, RunnerState};
 use crate::state::{app_data_dir, Store};
@@ -97,6 +98,61 @@ pub async fn destroy_start(
     };
 
     tokio::spawn(run_destroy(ctx));
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// scale_start — add worker nodes to a ready (or failed-scale) cluster
+// new_worker_count = 0 means "resume failed scale, keep existing count"
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn scale_start(
+    app: AppHandle,
+    store: State<'_, Arc<Store>>,
+    runner: State<'_, Arc<RunnerState>>,
+    cluster_id: String,
+    new_worker_count: u32,
+) -> Result<(), AppError> {
+    if runner.is_running(&cluster_id) {
+        return Err(AppError::Other(format!(
+            "operation already in progress for cluster {cluster_id}"
+        )));
+    }
+
+    let cluster = store.get_cluster(&cluster_id)?;
+
+    // Validate: new count must be greater than current (for fresh scale only)
+    if new_worker_count > 0 {
+        let current: u32 = cluster
+            .tfvars_json
+            .as_deref()
+            .and_then(|j| serde_json::from_str::<serde_json::Value>(j).ok())
+            .and_then(|v| v["worker_count"].as_u64())
+            .unwrap_or(0) as u32;
+        if new_worker_count <= current {
+            return Err(AppError::Other(format!(
+                "new_worker_count ({new_worker_count}) must be greater than current ({current})"
+            )));
+        }
+    }
+
+    let data_dir = app_data_dir()?;
+    let log_dir = data_dir.join("logs");
+
+    let ctx = ScaleCtx {
+        app: app.clone(),
+        store: Arc::clone(&*store),
+        runner: Arc::clone(&*runner),
+        cluster_id,
+        repo_path: PathBuf::from(&cluster.repo_path),
+        aws_profile: cluster.aws_profile,
+        aws_region: cluster.aws_region,
+        log_dir,
+        new_worker_count,
+    };
+
+    tokio::spawn(run_scale(ctx));
     Ok(())
 }
 

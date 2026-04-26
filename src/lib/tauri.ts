@@ -86,6 +86,11 @@ export const installCancel = (clusterId: string): Promise<void> =>
 export const destroyStart = (clusterId: string): Promise<void> =>
   call("destroy_start", { clusterId });
 
+export const scaleStart = (
+  clusterId: string,
+  newWorkerCount: number,
+): Promise<void> => call("scale_start", { clusterId, newWorkerCount });
+
 export const logsFetch = (
   clusterId: string,
   phase: string,

@@ -259,7 +259,7 @@ async fn run_install_inner(ctx: InstallCtx) -> Result<(), AppError> {
             // ----------------------------------------------------------------
             Phase::TerraformInit => {
                 run_phase(
-                    &ctx,
+                    &ctx.app, &ctx.cluster_id, &ctx.runner, &ctx.log_dir,
                     phase_key,
                     tf_dir.clone(),
                     "terraform",
@@ -271,7 +271,7 @@ async fn run_install_inner(ctx: InstallCtx) -> Result<(), AppError> {
 
             Phase::TerraformPlan => {
                 run_phase(
-                    &ctx,
+                    &ctx.app, &ctx.cluster_id, &ctx.runner, &ctx.log_dir,
                     phase_key,
                     tf_dir.clone(),
                     "terraform",
@@ -283,7 +283,7 @@ async fn run_install_inner(ctx: InstallCtx) -> Result<(), AppError> {
 
             Phase::TerraformApply => {
                 let code = run_phase(
-                    &ctx,
+                    &ctx.app, &ctx.cluster_id, &ctx.runner, &ctx.log_dir,
                     phase_key,
                     tf_dir.clone(),
                     "terraform",
@@ -303,7 +303,7 @@ async fn run_install_inner(ctx: InstallCtx) -> Result<(), AppError> {
             // ----------------------------------------------------------------
             Phase::MakeInventory => {
                 run_phase(
-                    &ctx,
+                    &ctx.app, &ctx.cluster_id, &ctx.runner, &ctx.log_dir,
                     phase_key,
                     ctx.repo_path.clone(),
                     "make",
@@ -315,7 +315,7 @@ async fn run_install_inner(ctx: InstallCtx) -> Result<(), AppError> {
 
             Phase::MakePing => {
                 run_phase(
-                    &ctx,
+                    &ctx.app, &ctx.cluster_id, &ctx.runner, &ctx.log_dir,
                     phase_key,
                     ctx.repo_path.clone(),
                     "make",
@@ -327,7 +327,7 @@ async fn run_install_inner(ctx: InstallCtx) -> Result<(), AppError> {
 
             Phase::MakeBootstrap => {
                 run_phase(
-                    &ctx,
+                    &ctx.app, &ctx.cluster_id, &ctx.runner, &ctx.log_dir,
                     phase_key,
                     ctx.repo_path.clone(),
                     "make",
@@ -339,7 +339,7 @@ async fn run_install_inner(ctx: InstallCtx) -> Result<(), AppError> {
 
             Phase::MakePrereq => {
                 run_phase(
-                    &ctx,
+                    &ctx.app, &ctx.cluster_id, &ctx.runner, &ctx.log_dir,
                     phase_key,
                     ctx.repo_path.clone(),
                     "make",
@@ -351,7 +351,7 @@ async fn run_install_inner(ctx: InstallCtx) -> Result<(), AppError> {
 
             Phase::MakeFreeipa => {
                 run_phase(
-                    &ctx,
+                    &ctx.app, &ctx.cluster_id, &ctx.runner, &ctx.log_dir,
                     phase_key,
                     ctx.repo_path.clone(),
                     "make",
@@ -363,7 +363,7 @@ async fn run_install_inner(ctx: InstallCtx) -> Result<(), AppError> {
 
             Phase::MakeDatabases => {
                 run_phase(
-                    &ctx,
+                    &ctx.app, &ctx.cluster_id, &ctx.runner, &ctx.log_dir,
                     phase_key,
                     ctx.repo_path.clone(),
                     "make",
@@ -375,7 +375,7 @@ async fn run_install_inner(ctx: InstallCtx) -> Result<(), AppError> {
 
             Phase::MakeCm => {
                 run_phase(
-                    &ctx,
+                    &ctx.app, &ctx.cluster_id, &ctx.runner, &ctx.log_dir,
                     phase_key,
                     ctx.repo_path.clone(),
                     "make",
@@ -466,10 +466,14 @@ fn capture_terraform_outputs(
 
 // ---------------------------------------------------------------------------
 // Helper — execute one subprocess phase via PTY runner
+// Public so orchestrator/scale.rs can reuse it.
 // ---------------------------------------------------------------------------
 
-async fn run_phase(
-    ctx: &InstallCtx,
+pub async fn run_phase(
+    app: &AppHandle,
+    cluster_id: &str,
+    runner: &Arc<RunnerState>,
+    log_dir: &PathBuf,
     phase_key: &str,
     cwd: PathBuf,
     program: &str,
@@ -477,17 +481,17 @@ async fn run_phase(
     env: HashMap<String, String>,
 ) -> Result<i32, AppError> {
     execute_command(
-        ctx.app.clone(),
+        app.clone(),
         CommandRun {
-            cluster_id: ctx.cluster_id.clone(),
+            cluster_id: cluster_id.to_string(),
             phase: phase_key.to_string(),
             cwd,
             program: program.to_string(),
             args: args.iter().map(|s| s.to_string()).collect(),
             env,
         },
-        ctx.log_dir.clone(),
-        ctx.runner.clone(),
+        log_dir.clone(),
+        runner.clone(),
     )
     .await
 }

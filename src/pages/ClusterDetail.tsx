@@ -10,6 +10,7 @@ import {
   Copy,
   Eye,
   EyeOff,
+  ChevronsUp,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -22,6 +23,7 @@ import {
   openSshTerminal,
   clusterEnvVars,
   destroyStart,
+  scaleStart,
 } from "@/lib/tauri";
 import { InstallProgress } from "./InstallProgress";
 import type { Cluster, PhaseEvent, TfvarsConfig } from "@/lib/types";
@@ -37,8 +39,8 @@ function StateBadge({ state }: { state: string }) {
     installing: "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300",
     ready: "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300",
     failed: "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300",
-    destroying:
-      "bg-orange-100 text-orange-700 dark:bg-orange-950 dark:text-orange-300",
+    destroying: "bg-orange-100 text-orange-700 dark:bg-orange-950 dark:text-orange-300",
+    scaling: "bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-300",
     destroyed: "bg-muted text-muted-foreground",
   };
   return (
@@ -367,6 +369,144 @@ function CostCard({ cluster }: { cluster: Cluster }) {
 }
 
 // ---------------------------------------------------------------------------
+// Scale workers panel (inline, shown below action bar)
+// ---------------------------------------------------------------------------
+
+const PRICE_WORKER: Record<string, number> = {
+  "r5.4xlarge": 1.008, "r5.2xlarge": 0.504, "r5.xlarge": 0.252,
+  "m5.4xlarge": 0.768, "m5.2xlarge": 0.384, "m5.xlarge": 0.192,
+  "c5.2xlarge": 0.34,  "c5.xlarge": 0.17,
+};
+
+function ScalePanel({
+  cluster,
+  onStarted,
+  onCancel,
+}: {
+  cluster: Cluster;
+  onStarted: (c: Cluster) => void;
+  onCancel: () => void;
+}) {
+  const tf: TfvarsConfig | null = (() => {
+    try { return cluster.tfvars_json ? JSON.parse(cluster.tfvars_json) : null; }
+    catch { return null; }
+  })();
+
+  const currentCount = tf?.worker_count ?? 0;
+  const [targetCount, setTargetCount] = useState(currentCount + 1);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const addCount = Math.max(0, targetCount - currentCount);
+  const workerType = tf?.worker_instance_type ?? "r5.4xlarge";
+  const pricePerWorker = PRICE_WORKER[workerType] ?? 0.2;
+  const addHourly = addCount * pricePerWorker;
+  const addMonthly = addHourly * 730;
+
+  async function handleScale() {
+    if (targetCount <= currentCount) {
+      setErr(`Target must be greater than current count (${currentCount})`);
+      return;
+    }
+    setBusy(true);
+    setErr(null);
+    try {
+      await scaleStart(cluster.id, targetCount);
+      onStarted(await clusterGet(cluster.id));
+    } catch (e: unknown) {
+      const msg =
+        typeof e === "object" && e !== null && "message" in e
+          ? String((e as { message: unknown }).message)
+          : String(e);
+      setErr(msg);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-primary/30 bg-primary/5 p-5 space-y-4 max-w-md">
+      <div className="space-y-0.5">
+        <h3 className="text-[14px] font-semibold">Scale worker nodes</h3>
+        <p className="text-[12px] text-muted-foreground">
+          Terraform adds the new EC2 instances, then Ansible installs
+          prerequisites and CM agents on them automatically.
+        </p>
+      </div>
+
+      <div className="space-y-3">
+        <div className="flex items-center justify-between text-[13px]">
+          <span className="text-muted-foreground">Current workers</span>
+          <span className="font-mono font-medium">
+            {currentCount} × {workerType}
+          </span>
+        </div>
+
+        <div className="space-y-1.5">
+          <label className="text-[13px] font-medium">New total worker count</label>
+          <div className="flex items-center gap-3">
+            <input
+              type="range"
+              min={currentCount + 1}
+              max={currentCount + 20}
+              value={targetCount}
+              onChange={(e) => setTargetCount(Number(e.target.value))}
+              className="flex-1 accent-primary"
+            />
+            <div className="flex items-center gap-1">
+              <input
+                type="number"
+                min={currentCount + 1}
+                value={targetCount}
+                onChange={(e) => {
+                  const n = Math.max(currentCount + 1, Number(e.target.value));
+                  setTargetCount(n);
+                }}
+                className="w-16 rounded-md border border-border bg-background px-2 py-1.5 text-[13px] outline-none focus:ring-1 focus:ring-ring text-center"
+              />
+              <span className="text-[12px] text-muted-foreground">nodes</span>
+            </div>
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            Adding <strong>{addCount}</strong> worker{addCount !== 1 ? "s" : ""}
+          </p>
+        </div>
+
+        {addCount > 0 && (
+          <div className="rounded-lg border border-border/50 divide-y divide-border/30 text-[12px]">
+            <div className="flex justify-between px-3 py-1.5 text-muted-foreground">
+              <span>Additional hourly cost</span>
+              <span className="tabular-nums text-foreground">
+                +${addHourly.toFixed(3)}/hr
+              </span>
+            </div>
+            <div className="flex justify-between px-3 py-1.5 font-medium">
+              <span>Additional monthly cost</span>
+              <span className="tabular-nums">+${addMonthly.toFixed(0)}/mo</span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {err && <p className="text-[12px] text-destructive">{err}</p>}
+
+      <div className="flex gap-2">
+        <Button
+          size="sm"
+          onClick={handleScale}
+          disabled={busy || addCount === 0}
+        >
+          <ChevronsUp className="h-3.5 w-3.5 mr-1.5" />
+          {busy ? "Starting scale…" : `Scale to ${targetCount} workers`}
+        </Button>
+        <Button size="sm" variant="outline" onClick={onCancel} disabled={busy}>
+          Cancel
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Ready / detail view
 // ---------------------------------------------------------------------------
 
@@ -382,6 +522,7 @@ function ReadyView({
   const [tab, setTab] = useState<Tab>("overview");
   const [showDestroy, setShowDestroy] = useState(false);
   const [destroying, setDestroying] = useState(false);
+  const [showScale, setShowScale] = useState(false);
   const [cmBusy, setCmBusy] = useState(false);
   const [tunnelBusy, setTunnelBusy] = useState(false);
   const [sshBusy, setSshBusy] = useState(false);
@@ -527,6 +668,19 @@ function ReadyView({
           <Button
             variant="outline"
             size="sm"
+            className={cn(
+              showScale
+                ? "border-primary text-primary bg-primary/5"
+                : "",
+            )}
+            onClick={() => setShowScale((s) => !s)}
+          >
+            <ChevronsUp className="h-3.5 w-3.5 mr-1.5" />
+            Scale Workers
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             className="text-destructive hover:text-destructive hover:bg-destructive/10 border-destructive/40 ml-auto"
             onClick={() => setShowDestroy(true)}
           >
@@ -536,6 +690,16 @@ function ReadyView({
         </div>
         {actionError && (
           <p className="text-[12px] text-destructive">{actionError}</p>
+        )}
+        {showScale && (
+          <ScalePanel
+            cluster={cluster}
+            onStarted={(c) => {
+              setShowScale(false);
+              onClusterChange(c);
+            }}
+            onCancel={() => setShowScale(false)}
+          />
         )}
       </div>
 
@@ -647,7 +811,12 @@ export default function ClusterDetail() {
 
   const { state } = cluster;
 
-  if (state === "installing" || state === "destroying" || state === "failed") {
+  if (
+    state === "installing" ||
+    state === "destroying" ||
+    state === "scaling" ||
+    state === "failed"
+  ) {
     return (
       <div className="flex flex-col h-full">
         <InstallProgress cluster={cluster} onClusterChange={setCluster} />

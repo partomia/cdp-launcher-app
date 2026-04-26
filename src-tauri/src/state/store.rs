@@ -267,6 +267,15 @@ impl Store {
         Ok(n as u64)
     }
 
+    pub fn update_cluster_tfvars_json(&self, id: &str, tfvars_json: &str) -> Result<(), AppError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE clusters SET tfvars_json = ?1 WHERE id = ?2",
+            params![tfvars_json, id],
+        )?;
+        Ok(())
+    }
+
     pub fn update_cluster_metadata(&self, id: &str, metadata_json: &str) -> Result<(), AppError> {
         let conn = self.conn.lock().unwrap();
         conn.execute(

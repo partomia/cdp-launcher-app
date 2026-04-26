@@ -3,7 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { Loader2, XCircle, CheckCircle, StopCircle, RotateCcw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { installCancel, installStart, destroyStart, clusterGet, clusterPhaseEvents } from "@/lib/tauri";
+import { installCancel, installStart, destroyStart, scaleStart, clusterGet, clusterPhaseEvents } from "@/lib/tauri";
 import { PhaseTracker } from "@/components/PhaseTracker";
 import { LogPane } from "@/components/LogPane";
 import { ErrorHintBanner } from "@/components/ErrorHintBanner";
@@ -17,8 +17,8 @@ interface Props {
 function StateBadge({ state }: { state: string }) {
   const variants: Record<string, string> = {
     installing: "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300",
-    destroying:
-      "bg-orange-100 text-orange-700 dark:bg-orange-950 dark:text-orange-300",
+    destroying: "bg-orange-100 text-orange-700 dark:bg-orange-950 dark:text-orange-300",
+    scaling: "bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-300",
     failed: "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300",
     ready: "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300",
     destroyed: "bg-muted text-muted-foreground",
@@ -49,6 +49,7 @@ export function InstallProgress({ cluster, onClusterChange }: Props) {
   const [cancelling, setCancelling] = useState(false);
   const [resuming, setResuming] = useState(false);
   const [retryingDestroy, setRetryingDestroy] = useState(false);
+  const [resumingScale, setResumingScale] = useState(false);
   const [phaseEvents, setPhaseEvents] = useState<import("@/lib/types").PhaseEvent[]>([]);
   const [elapsed, setElapsed] = useState(() =>
     elapsedSince(cluster.created_at),
@@ -56,7 +57,9 @@ export function InstallProgress({ cluster, onClusterChange }: Props) {
   const [activeHint, setActiveHint] = useState<ErrorHint | null>(null);
 
   const isActive =
-    cluster.state === "installing" || cluster.state === "destroying";
+    cluster.state === "installing" ||
+    cluster.state === "destroying" ||
+    cluster.state === "scaling";
 
   // Tick elapsed time while active
   useEffect(() => {
@@ -75,6 +78,15 @@ export function InstallProgress({ cluster, onClusterChange }: Props) {
       .catch(() => {});
   }, [cluster.id, cluster.state]);
 
+  // True when the most recent phase event is a scale_ phase
+  const isScaleFailure = (() => {
+    if (phaseEvents.length === 0) return false;
+    const sorted = [...phaseEvents].sort(
+      (a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime(),
+    );
+    return sorted[0].phase.startsWith("scale_");
+  })();
+
   // True only when the most recent phase event is the destroy phase.
   // Using .some() would incorrectly match old destroy events on a cluster
   // that has since been resumed for install.
@@ -86,9 +98,23 @@ export function InstallProgress({ cluster, onClusterChange }: Props) {
     return sorted[0].phase === "make_tf_destroy";
   })();
 
+  async function handleResumeScale() {
+    setResumingScale(true);
+    try {
+      await scaleStart(cluster.id, 0); // 0 = resume, keep existing target count
+      onClusterChange(await clusterGet(cluster.id));
+    } catch {}
+    setResumingScale(false);
+  }
+
   // Refresh cluster record when install or destroy finishes
   useEffect(() => {
     const subs = [
+      listen("scale-complete", async () => {
+        try {
+          onClusterChange(await clusterGet(cluster.id));
+        } catch {}
+      }),
       listen("install-complete", async () => {
         try {
           onClusterChange(await clusterGet(cluster.id));
@@ -157,7 +183,8 @@ export function InstallProgress({ cluster, onClusterChange }: Props) {
         </span>
 
         <div className="ml-auto flex gap-2">
-          {(cluster.state === "failed" || cluster.state === "installing") && !isDestroyFailure && (
+          {(cluster.state === "failed" || cluster.state === "installing") &&
+            !isDestroyFailure && !isScaleFailure && (
             <Button
               variant="outline"
               size="sm"
@@ -166,6 +193,17 @@ export function InstallProgress({ cluster, onClusterChange }: Props) {
             >
               <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
               {resuming ? "Starting…" : "Resume install"}
+            </Button>
+          )}
+          {cluster.state === "failed" && isScaleFailure && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleResumeScale}
+              disabled={resumingScale}
+            >
+              <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
+              {resumingScale ? "Starting…" : "Resume scale"}
             </Button>
           )}
           {cluster.state === "failed" && isDestroyFailure && (

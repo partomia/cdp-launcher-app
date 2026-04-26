@@ -205,4 +205,16 @@ export const PHASE_DEFS = [
   { key: "make_cm", label: "Cloudera Manager" },
 ] as const;
 
+/** Scale-out phase keys and labels — rendered dynamically in PhaseTracker */
+export const SCALE_PHASE_LABELS: Record<string, string> = {
+  scale_tfvars:    "Scale: Update tfvars",
+  scale_tf_plan:   "Scale: Terraform Plan",
+  scale_tf_apply:  "Scale: Terraform Apply",
+  scale_inventory: "Scale: Regenerate Inventory",
+  scale_ping:      "Scale: Ping New Nodes",
+  scale_bootstrap: "Scale: Bootstrap",
+  scale_prereq:    "Scale: Prerequisites",
+  scale_cm_agents: "Scale: CM Agents",
+};
+
 export type PhaseKey = (typeof PHASE_DEFS)[number]["key"];
