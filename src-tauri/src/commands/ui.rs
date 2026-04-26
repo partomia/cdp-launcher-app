@@ -186,19 +186,17 @@ pub async fn open_cm_ui(
     // to 127.0.0.1.
     let util1_fqdn = format!("util1.{domain}");
     let hosts_entry = format!("127.0.0.1 {util1_fqdn}");
-    // Only append if not already present (idempotent, uses osascript for sudo on macOS)
-    let check_and_add = format!(
-        r#"grep -qF '{hosts_entry}' /etc/hosts || echo '{hosts_entry}' >> /etc/hosts"#
-    );
-    let _ = std::process::Command::new("osascript")
-        .args([
-            "-e",
-            &format!(
-                r#"do shell script "{}" with administrator privileges"#,
-                check_and_add.replace('"', r#"\""#)
-            ),
-        ])
-        .status();
+    // Only call osascript (which prompts for admin password) if the entry is not already present.
+    let hosts_content = std::fs::read_to_string("/etc/hosts").unwrap_or_default();
+    if !hosts_content.contains(&hosts_entry) {
+        let add_cmd = format!("echo '{}' >> /etc/hosts", hosts_entry);
+        let _ = std::process::Command::new("osascript")
+            .args([
+                "-e",
+                &format!(r#"do shell script "{}" with administrator privileges"#, add_cmd),
+            ])
+            .status();
+    }
 
     // Two-hop tunnel: local:7183 → bastion (ProxyCommand) → util1:7183
     // We forward to util1_ip directly so the TLS certificate hostname (util1.<domain>) matches.
