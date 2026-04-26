@@ -26,6 +26,7 @@ pub enum Phase {
     MakeFreeipa,
     MakeDatabases,
     MakeCm,
+    MakeKerberos,
 }
 
 impl Phase {
@@ -42,6 +43,7 @@ impl Phase {
             Self::MakeFreeipa => "make_freeipa",
             Self::MakeDatabases => "make_databases",
             Self::MakeCm => "make_cm",
+            Self::MakeKerberos => "make_kerberos",
         }
     }
 
@@ -58,6 +60,7 @@ impl Phase {
             Self::MakeFreeipa,
             Self::MakeDatabases,
             Self::MakeCm,
+            Self::MakeKerberos,
         ]
     }
 }
@@ -182,8 +185,9 @@ async fn run_install_inner(ctx: InstallCtx) -> Result<(), AppError> {
     for &phase in Phase::all() {
         let phase_key = phase.key();
 
-        // Skip FreeIPA when using an external directory (LDAP / AD).
-        if phase == Phase::MakeFreeipa && tfvars_cfg.directory_type != "freeipa" {
+        // Skip FreeIPA and Kerberos (FreeIPA KDC) when using an external directory (LDAP / AD).
+        let is_freeipa_only = phase == Phase::MakeFreeipa || phase == Phase::MakeKerberos;
+        if is_freeipa_only && tfvars_cfg.directory_type != "freeipa" {
             tracing::info!(
                 "skipping phase {phase_key} — directory_type={}",
                 tfvars_cfg.directory_type
@@ -194,7 +198,7 @@ async fn run_install_inner(ctx: InstallCtx) -> Result<(), AppError> {
                     "cluster_id": ctx.cluster_id,
                     "phase": phase_key,
                     "stream": "pty",
-                    "line": format!("[skipped — directory_type={}, FreeIPA not required]",
+                    "line": format!("[skipped — directory_type={}, FreeIPA/Kerberos not required]",
                         tfvars_cfg.directory_type),
                     "timestamp": chrono::Utc::now().to_rfc3339(),
                 }),
@@ -380,6 +384,20 @@ async fn run_install_inner(ctx: InstallCtx) -> Result<(), AppError> {
                     ctx.repo_path.clone(),
                     "make",
                     &["cm"],
+                    base_env.clone(),
+                )
+                .await?
+            }
+
+            // Enables Kerberos in CM against FreeIPA (50-kerberos.yml).
+            // Skipped automatically above when directory_type != "freeipa".
+            Phase::MakeKerberos => {
+                run_phase(
+                    &ctx.app, &ctx.cluster_id, &ctx.runner, &ctx.log_dir,
+                    phase_key,
+                    ctx.repo_path.clone(),
+                    "make",
+                    &["kerberos"],
                     base_env.clone(),
                 )
                 .await?

@@ -203,6 +203,7 @@ export const PHASE_DEFS = [
   { key: "make_freeipa", label: "FreeIPA" },
   { key: "make_databases", label: "Databases" },
   { key: "make_cm", label: "Cloudera Manager" },
+  { key: "make_kerberos", label: "Kerberos" },
 ] as const;
 
 /** Scale-out phase keys and labels — rendered dynamically in PhaseTracker */
