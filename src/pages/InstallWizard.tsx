@@ -13,7 +13,7 @@ import {
 import { DEFAULT_TFVARS } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Reusable form primitives
 // ---------------------------------------------------------------------------
 
 interface FieldProps {
@@ -37,17 +37,20 @@ function Input({
   placeholder,
   className,
   type = "text",
+  min,
 }: {
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
   className?: string;
   type?: string;
+  min?: number;
 }) {
   return (
     <input
       type={type}
       value={value}
+      min={min}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
       className={cn(
@@ -105,14 +108,20 @@ interface WizardForm {
   repoPath: string;
   awsProfile: string;
   awsRegion: string;
-  // Step 2: infra
+  // Step 2: infrastructure
   sshKeyName: string;
   operatorCidr: string;
+  workerCount: number;
+  directoryType: string; // "freeipa" | "ldap" | "ad"
+  ldapUrl: string;
+  ldapBindDn: string;
+  ldapBaseDn: string;
   // Step 3: passwords
   paywallUser: string;
   paywallPass: string;
-  dsPassword: string;
-  admPassword: string;
+  dsPassword: string;     // FreeIPA only
+  admPassword: string;    // FreeIPA only
+  ldapBindPassword: string; // LDAP/AD only
   cmAdminPassword: string;
   dbRootPassword: string;
 }
@@ -125,10 +134,16 @@ const INITIAL: WizardForm = {
   awsRegion: DEFAULT_TFVARS.aws_region,
   sshKeyName: DEFAULT_TFVARS.ssh_key_name,
   operatorCidr: "",
+  workerCount: 5,
+  directoryType: "freeipa",
+  ldapUrl: "",
+  ldapBindDn: "",
+  ldapBaseDn: "",
   paywallUser: "",
   paywallPass: "",
   dsPassword: "",
   admPassword: "",
+  ldapBindPassword: "",
   cmAdminPassword: "",
   dbRootPassword: "",
 };
@@ -136,7 +151,7 @@ const INITIAL: WizardForm = {
 const STEPS = ["Provider", "Basics", "Infrastructure", "Passwords", "Review"];
 
 // ---------------------------------------------------------------------------
-// Step panels
+// Step 0 — Provider selector
 // ---------------------------------------------------------------------------
 
 interface ProviderOption {
@@ -147,10 +162,30 @@ interface ProviderOption {
 }
 
 const PROVIDERS: ProviderOption[] = [
-  { id: "aws", label: "Amazon Web Services", description: "Deploy to AWS with Terraform + Ansible automation", available: true },
-  { id: "gcp", label: "Google Cloud Platform", description: "GCP support coming soon", available: false },
-  { id: "azure", label: "Microsoft Azure", description: "Azure support coming soon", available: false },
-  { id: "onprem", label: "On-Premises", description: "Bare-metal / on-prem support coming soon", available: false },
+  {
+    id: "aws",
+    label: "Amazon Web Services",
+    description: "Deploy to AWS with Terraform + Ansible automation",
+    available: true,
+  },
+  {
+    id: "gcp",
+    label: "Google Cloud Platform",
+    description: "GCP support coming soon",
+    available: false,
+  },
+  {
+    id: "azure",
+    label: "Microsoft Azure",
+    description: "Azure support coming soon",
+    available: false,
+  },
+  {
+    id: "onprem",
+    label: "On-Premises",
+    description: "Bare-metal / on-prem support coming soon",
+    available: false,
+  },
 ];
 
 function Step0({
@@ -163,14 +198,17 @@ function Step0({
   return (
     <div className="space-y-3">
       <p className="text-[12px] text-muted-foreground mb-4">
-        Select the target cloud or infrastructure provider for this CDP deployment.
+        Select the target cloud or infrastructure provider for this CDP
+        deployment.
       </p>
       {PROVIDERS.map((p) => (
         <button
           key={p.id}
           type="button"
           disabled={!p.available}
-          onClick={() => p.available && setForm((f) => ({ ...f, provider: p.id }))}
+          onClick={() =>
+            p.available && setForm((f) => ({ ...f, provider: p.id }))
+          }
           className={cn(
             "w-full text-left rounded-lg border px-4 py-3 transition-colors",
             !p.available
@@ -193,12 +231,18 @@ function Step0({
               </span>
             )}
           </div>
-          <p className="text-[11px] text-muted-foreground mt-0.5">{p.description}</p>
+          <p className="text-[11px] text-muted-foreground mt-0.5">
+            {p.description}
+          </p>
         </button>
       ))}
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Step 1 — Basics
+// ---------------------------------------------------------------------------
 
 function Step1({
   form,
@@ -273,6 +317,30 @@ function Step1({
   );
 }
 
+// ---------------------------------------------------------------------------
+// Step 2 — Infrastructure (SSH, CIDR, worker count, directory type)
+// ---------------------------------------------------------------------------
+
+const DIR_OPTIONS = [
+  {
+    id: "freeipa",
+    label: "FreeIPA",
+    description:
+      "Install FreeIPA server — provides Kerberos KDC + LDAP in one step",
+  },
+  {
+    id: "ldap",
+    label: "External LDAP",
+    description:
+      "Use an existing OpenLDAP / 389-DS server — skip FreeIPA install",
+  },
+  {
+    id: "ad",
+    label: "Active Directory",
+    description: "Use Microsoft AD for Kerberos + LDAP — skip FreeIPA install",
+  },
+];
+
 function Step2({
   form,
   setForm,
@@ -285,8 +353,11 @@ function Step2({
   const set = (k: keyof WizardForm) => (v: string) =>
     setForm((f) => ({ ...f, [k]: v }));
 
+  const isExternal = form.directoryType === "ldap" || form.directoryType === "ad";
+
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
+      {/* SSH key + CIDR */}
       <Field label="SSH key pair name" hint="Must exist in your AWS region">
         <Input
           value={form.sshKeyName}
@@ -299,7 +370,7 @@ function Step2({
         label="Operator ingress CIDR"
         hint={
           detectedIp
-            ? `Your detected public IP: ${detectedIp} — use ${detectedIp}/32`
+            ? `Detected IP: ${detectedIp} → use ${detectedIp}/32`
             : "Your public IP in CIDR notation, e.g. 1.2.3.4/32"
         }
       >
@@ -309,9 +380,139 @@ function Step2({
           placeholder="1.2.3.4/32"
         />
       </Field>
+
+      {/* Worker count */}
+      <Field
+        label="Worker node count"
+        hint="Minimum 3. Each worker gets 4 × 1 TB data disks by default."
+      >
+        <div className="flex items-center gap-3">
+          <input
+            type="range"
+            min={3}
+            max={20}
+            value={form.workerCount}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, workerCount: Number(e.target.value) }))
+            }
+            className="flex-1 accent-primary"
+          />
+          <div className="flex items-center gap-1">
+            <input
+              type="number"
+              min={3}
+              value={form.workerCount}
+              onChange={(e) => {
+                const n = Math.max(3, Number(e.target.value));
+                setForm((f) => ({ ...f, workerCount: n }));
+              }}
+              className="w-16 rounded-md border border-border bg-background px-2 py-1.5 text-[13px] outline-none focus:ring-1 focus:ring-ring text-center"
+            />
+            <span className="text-[12px] text-muted-foreground">nodes</span>
+          </div>
+        </div>
+      </Field>
+
+      {/* Directory / identity type */}
+      <div className="space-y-2">
+        <label className="block text-[13px] font-medium">
+          Identity & directory service
+        </label>
+        <div className="space-y-2">
+          {DIR_OPTIONS.map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() => setForm((f) => ({ ...f, directoryType: opt.id }))}
+              className={cn(
+                "w-full text-left rounded-lg border px-4 py-2.5 transition-colors",
+                form.directoryType === opt.id
+                  ? "border-primary bg-primary/5 ring-1 ring-primary"
+                  : "border-border/60 hover:border-primary/40 hover:bg-muted/20",
+              )}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-[13px] font-medium">{opt.label}</span>
+                {form.directoryType === opt.id && (
+                  <span className="text-[10px] font-medium text-primary bg-primary/10 rounded-full px-2 py-0.5">
+                    Selected
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                {opt.description}
+              </p>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* External LDAP/AD connection details */}
+      {isExternal && (
+        <div className="space-y-4 rounded-lg border border-border/60 bg-muted/10 p-4">
+          <p className="text-[12px] font-medium text-muted-foreground">
+            {form.directoryType === "ad"
+              ? "Active Directory connection"
+              : "External LDAP connection"}
+          </p>
+
+          <Field
+            label="Server URL"
+            hint={
+              form.directoryType === "ad"
+                ? "e.g. ldap://dc1.corp.example.com:389 or ldaps://dc1.corp.example.com:636"
+                : "e.g. ldap://ldap.example.com:389 or ldaps://ldap.example.com:636"
+            }
+          >
+            <Input
+              value={form.ldapUrl}
+              onChange={set("ldapUrl")}
+              placeholder={
+                form.directoryType === "ad"
+                  ? "ldap://dc1.corp.example.com:389"
+                  : "ldap://ldap.example.com:389"
+              }
+            />
+          </Field>
+
+          <Field
+            label="Bind DN"
+            hint="The service account DN Cloudera Manager uses to search the directory"
+          >
+            <Input
+              value={form.ldapBindDn}
+              onChange={set("ldapBindDn")}
+              placeholder={
+                form.directoryType === "ad"
+                  ? "cn=cm-bind,cn=Users,dc=corp,dc=example,dc=com"
+                  : "cn=cm-bind,ou=serviceaccounts,dc=example,dc=com"
+              }
+            />
+          </Field>
+
+          <Field
+            label="Base DN"
+            hint="Root of the directory tree to search for users and groups"
+          >
+            <Input
+              value={form.ldapBaseDn}
+              onChange={set("ldapBaseDn")}
+              placeholder={
+                form.directoryType === "ad"
+                  ? "dc=corp,dc=example,dc=com"
+                  : "dc=example,dc=com"
+              }
+            />
+          </Field>
+        </div>
+      )}
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Step 3 — Passwords (conditional on directory type)
+// ---------------------------------------------------------------------------
 
 function Step3({
   form,
@@ -323,36 +524,106 @@ function Step3({
   const set = (k: keyof WizardForm) => (v: string) =>
     setForm((f) => ({ ...f, [k]: v }));
 
-  const fields: Array<[keyof WizardForm, string, string]> = [
-    ["paywallUser", "CDP Paywall username", "Cloudera portal username"],
-    ["paywallPass", "CDP Paywall password", "Cloudera portal password"],
-    ["dsPassword", "DS password", "Data Steward / Ranger password"],
-    ["admPassword", "Admin password", "Cluster admin password"],
-    ["cmAdminPassword", "CM admin password", "Cloudera Manager admin password"],
-    ["dbRootPassword", "DB root password", "Database root password"],
-  ];
+  const isFreeipa = form.directoryType === "freeipa";
 
   return (
     <div className="space-y-5">
       <p className="text-[12px] text-muted-foreground">
-        These are stored securely in macOS Keychain — never written to disk
+        Credentials are stored in macOS Keychain — never written to disk
         unencrypted.
       </p>
-      {fields.map(([key, label, hint]) => (
-        <Field key={key} label={label} hint={hint}>
+
+      <Field label="CDP Paywall username" hint="Cloudera portal username">
+        <Input
+          value={form.paywallUser}
+          onChange={set("paywallUser")}
+          placeholder="user@example.com"
+        />
+      </Field>
+
+      <Field label="CDP Paywall password" hint="Cloudera portal password">
+        <PasswordInput
+          value={form.paywallPass}
+          onChange={set("paywallPass")}
+          placeholder="••••••••"
+        />
+      </Field>
+
+      {isFreeipa && (
+        <>
+          <Field
+            label="DS password"
+            hint="389-DS Directory Manager password (FreeIPA internal)"
+          >
+            <PasswordInput
+              value={form.dsPassword}
+              onChange={set("dsPassword")}
+              placeholder="••••••••"
+            />
+          </Field>
+
+          <Field
+            label="Admin password"
+            hint="FreeIPA 'admin' principal password"
+          >
+            <PasswordInput
+              value={form.admPassword}
+              onChange={set("admPassword")}
+              placeholder="••••••••"
+            />
+          </Field>
+        </>
+      )}
+
+      {!isFreeipa && (
+        <Field
+          label="LDAP bind password"
+          hint={`Password for the CM service account (bind DN entered in the previous step)`}
+        >
           <PasswordInput
-            value={form[key] as string}
-            onChange={set(key)}
+            value={form.ldapBindPassword}
+            onChange={set("ldapBindPassword")}
             placeholder="••••••••"
           />
         </Field>
-      ))}
+      )}
+
+      <Field label="CM admin password" hint="Cloudera Manager admin password">
+        <PasswordInput
+          value={form.cmAdminPassword}
+          onChange={set("cmAdminPassword")}
+          placeholder="••••••••"
+        />
+      </Field>
+
+      <Field label="DB root password" hint="Database root password">
+        <PasswordInput
+          value={form.dbRootPassword}
+          onChange={set("dbRootPassword")}
+          placeholder="••••••••"
+        />
+      </Field>
     </div>
   );
 }
 
-function Step5({ form }: { form: WizardForm }) {
-  const providerLabels: Record<string, string> = { aws: "Amazon Web Services", gcp: "Google Cloud Platform", azure: "Microsoft Azure", onprem: "On-Premises" };
+// ---------------------------------------------------------------------------
+// Step 4 — Review
+// ---------------------------------------------------------------------------
+
+function Step4({ form }: { form: WizardForm }) {
+  const providerLabels: Record<string, string> = {
+    aws: "Amazon Web Services",
+    gcp: "Google Cloud Platform",
+    azure: "Microsoft Azure",
+    onprem: "On-Premises",
+  };
+  const dirLabels: Record<string, string> = {
+    freeipa: "FreeIPA (install on cluster)",
+    ldap: "External LDAP",
+    ad: "Active Directory",
+  };
+
   const rows: Array<[string, string]> = [
     ["Provider", providerLabels[form.provider] ?? form.provider],
     ["Cluster name", form.clusterName],
@@ -361,10 +632,28 @@ function Step5({ form }: { form: WizardForm }) {
     ["AWS region", form.awsRegion],
     ["SSH key", form.sshKeyName],
     ["Operator CIDR", form.operatorCidr],
+    ["Worker count", String(form.workerCount)],
+    ["Directory", dirLabels[form.directoryType] ?? form.directoryType],
+    ...(form.directoryType !== "freeipa"
+      ? ([
+          ["LDAP URL", form.ldapUrl || "(not set)"],
+          ["LDAP bind DN", form.ldapBindDn || "(not set)"],
+          ["LDAP base DN", form.ldapBaseDn || "(not set)"],
+        ] as Array<[string, string]>)
+      : []),
     ["Paywall user", form.paywallUser],
     ["Paywall pass", form.paywallPass ? "••••••••" : "(not set)"],
-    ["DS password", form.dsPassword ? "••••••••" : "(not set)"],
-    ["Admin password", form.admPassword ? "••••••••" : "(not set)"],
+    ...(form.directoryType === "freeipa"
+      ? ([
+          ["DS password", form.dsPassword ? "••••••••" : "(not set)"],
+          ["Admin password", form.admPassword ? "••••••••" : "(not set)"],
+        ] as Array<[string, string]>)
+      : ([
+          [
+            "LDAP bind pass",
+            form.ldapBindPassword ? "••••••••" : "(not set)",
+          ],
+        ] as Array<[string, string]>)),
     ["CM admin pass", form.cmAdminPassword ? "••••••••" : "(not set)"],
     ["DB root pass", form.dbRootPassword ? "••••••••" : "(not set)"],
   ];
@@ -410,12 +699,22 @@ function validateStep(step: number, form: WizardForm): string | null {
   if (step === 2) {
     if (!form.sshKeyName.trim()) return "SSH key name is required";
     if (!form.operatorCidr.trim()) return "Operator CIDR is required";
+    if (form.workerCount < 3) return "Worker count must be at least 3";
+    if (form.directoryType !== "freeipa") {
+      if (!form.ldapUrl.trim()) return "LDAP server URL is required";
+      if (!form.ldapBindDn.trim()) return "LDAP bind DN is required";
+      if (!form.ldapBaseDn.trim()) return "LDAP base DN is required";
+    }
   }
   if (step === 3) {
     if (!form.paywallUser.trim()) return "Paywall username is required";
     if (!form.paywallPass) return "Paywall password is required";
-    if (!form.dsPassword) return "DS password is required";
-    if (!form.admPassword) return "Admin password is required";
+    if (form.directoryType === "freeipa") {
+      if (!form.dsPassword) return "DS password is required";
+      if (!form.admPassword) return "Admin password is required";
+    } else {
+      if (!form.ldapBindPassword) return "LDAP bind password is required";
+    }
     if (!form.cmAdminPassword) return "CM admin password is required";
     if (!form.dbRootPassword) return "DB root password is required";
   }
@@ -436,7 +735,6 @@ export default function InstallWizard() {
   const [launching, setLaunching] = useState(false);
   const [launchError, setLaunchError] = useState<string | null>(null);
 
-  // Fetch AWS profiles on mount
   useEffect(() => {
     awsProfileList()
       .then(setProfiles)
@@ -477,17 +775,7 @@ export default function InstallWizard() {
     setLaunching(true);
 
     try {
-      // 1. Store passwords in Keychain
-      const secrets: Array<[string, string]> = [
-        ["PAYWALL_USER", form.paywallUser],
-        ["PAYWALL_PASS", form.paywallPass],
-        ["DS_PASSWORD", form.dsPassword],
-        ["ADM_PASSWORD", form.admPassword],
-        ["CM_ADMIN_PASSWORD", form.cmAdminPassword],
-        ["DB_ROOT_PASSWORD", form.dbRootPassword],
-      ];
-      // We need the cluster ID first — but we don't have it yet.
-      // Create the cluster, then write secrets using the new ID.
+      // Build tfvars config
       const tfvars = {
         ...DEFAULT_TFVARS,
         aws_region: form.awsRegion,
@@ -495,9 +783,18 @@ export default function InstallWizard() {
         operator_ingress_cidrs: form.operatorCidr.trim()
           ? [form.operatorCidr.trim()]
           : [],
+        worker_count: form.workerCount,
+        directory_type: form.directoryType,
+        ...(form.directoryType !== "freeipa"
+          ? {
+              ldap_url: form.ldapUrl,
+              ldap_bind_dn: form.ldapBindDn,
+              ldap_base_dn: form.ldapBaseDn,
+            }
+          : {}),
       };
 
-      // 2. Create cluster record
+      // Create cluster record
       const cluster = await clusterCreate({
         name: form.clusterName.trim(),
         repo_path: form.repoPath.trim(),
@@ -507,15 +804,31 @@ export default function InstallWizard() {
         provider: form.provider,
       });
 
-      // 3. Write secrets with real cluster ID
+      // Write secrets to keychain
+      const secrets: Array<[string, string]> = [
+        ["PAYWALL_USER", form.paywallUser],
+        ["PAYWALL_PASS", form.paywallPass],
+        ["CM_ADMIN_PASSWORD", form.cmAdminPassword],
+        ["DB_ROOT_PASSWORD", form.dbRootPassword],
+      ];
+
+      if (form.directoryType === "freeipa") {
+        secrets.push(["DS_PASSWORD", form.dsPassword]);
+        secrets.push(["ADM_PASSWORD", form.admPassword]);
+      } else {
+        secrets.push(["LDAP_BIND_PASSWORD", form.ldapBindPassword]);
+        // Still write placeholder values so the keychain keys exist
+        secrets.push(["DS_PASSWORD", ""]);
+        secrets.push(["ADM_PASSWORD", ""]);
+      }
+
       for (const [key, value] of secrets) {
         await keychainSet(cluster.id, key, value);
       }
 
-      // 4. Kick off install
+      // Kick off install
       await installStart(cluster.id);
 
-      // 5. Navigate to cluster detail
       navigate(`/cluster/${cluster.id}`);
     } catch (e: unknown) {
       const msg =
@@ -580,10 +893,10 @@ export default function InstallWizard() {
             <Step2 form={form} setForm={setForm} detectedIp={detectedIp} />
           )}
           {step === 3 && <Step3 form={form} setForm={setForm} />}
-          {step === 4 && <Step5 form={form} />}
+          {step === 4 && <Step4 form={form} />}
         </div>
 
-        {/* Validation / launch errors */}
+        {/* Errors */}
         {(validationError || launchError) && (
           <p className="text-[12px] text-destructive">
             {validationError ?? launchError}

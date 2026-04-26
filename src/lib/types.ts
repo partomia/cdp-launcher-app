@@ -78,6 +78,14 @@ export interface TfvarsConfig {
   worker_instance_type: string;
   edge_instance_type: string;
   ssh_key_name: string;
+  /** "freeipa" | "ldap" | "ad" — controls whether FreeIPA is installed */
+  directory_type: string;
+  /** External LDAP/AD server URL, e.g. ldap://ldap.example.com:389 */
+  ldap_url?: string;
+  /** LDAP bind DN for CM auth, e.g. cn=cm-bind,dc=example,dc=com */
+  ldap_bind_dn?: string;
+  /** LDAP search base DN, e.g. dc=example,dc=com */
+  ldap_base_dn?: string;
 }
 
 export const DEFAULT_TFVARS: TfvarsConfig = {
@@ -103,6 +111,7 @@ export const DEFAULT_TFVARS: TfvarsConfig = {
   worker_instance_type: "r5.4xlarge",
   edge_instance_type: "m5.xlarge",
   ssh_key_name: "cdp732",
+  directory_type: "freeipa",
 };
 
 // ---------------------------------------------------------------------------

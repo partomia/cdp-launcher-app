@@ -108,7 +108,8 @@ function ProviderBadge({ provider }: { provider: string }) {
     aws: "bg-orange-100 text-orange-700 dark:bg-orange-950 dark:text-orange-300",
     gcp: "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300",
     azure: "bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300",
-    onprem: "bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300",
+    onprem:
+      "bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300",
   };
   return (
     <span
@@ -123,6 +124,55 @@ function ProviderBadge({ provider }: { provider: string }) {
 }
 
 // ---------------------------------------------------------------------------
+// Inline delete confirmation row
+// ---------------------------------------------------------------------------
+
+function DeleteConfirm({
+  cluster,
+  onConfirm,
+  onCancel,
+  busy,
+}: {
+  cluster: Cluster;
+  onConfirm: () => void;
+  onCancel: () => void;
+  busy: boolean;
+}) {
+  return (
+    <tr className="bg-destructive/5 border-t border-destructive/20">
+      <td colSpan={8} className="px-4 py-3">
+        <div className="flex items-center justify-between gap-4">
+          <p className="text-[12px] text-destructive">
+            Delete record for <strong>{cluster.name}</strong>? This only
+            removes the database entry — no cloud resources are affected.
+          </p>
+          <div className="flex gap-1.5 flex-shrink-0">
+            <Button
+              size="sm"
+              variant="destructive"
+              className="h-7 px-3 text-[12px]"
+              onClick={onConfirm}
+              disabled={busy}
+            >
+              {busy ? "Deleting…" : "Confirm delete"}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 px-3 text-[12px]"
+              onClick={onCancel}
+              disabled={busy}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Dashboard
 // ---------------------------------------------------------------------------
 
@@ -131,6 +181,7 @@ export default function Dashboard() {
   const [clusters, setClusters] = useState<Cluster[]>([]);
   const [loading, setLoading] = useState(true);
   const [destroying, setDestroying] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -170,11 +221,11 @@ export default function Dashboard() {
     }
   }
 
-  async function handleDelete(cluster: Cluster) {
-    if (!confirm(`Delete record for "${cluster.name}"? This only removes the database entry — no AWS resources are affected.`)) return;
-    setDeleting(cluster.id);
+  async function handleDeleteConfirmed(id: string) {
+    setDeleting(id);
     try {
-      await clusterDeleteMetadata(cluster.id);
+      await clusterDeleteMetadata(id);
+      setConfirmDelete(null);
       await load();
     } catch (e: unknown) {
       alert(e instanceof Error ? e.message : String(e));
@@ -182,6 +233,8 @@ export default function Dashboard() {
       setDeleting(null);
     }
   }
+
+  const deletableStates = new Set(["destroyed", "failed", "draft"]);
 
   if (loading) {
     return (
@@ -258,65 +311,91 @@ export default function Dashboard() {
           </thead>
           <tbody className="divide-y divide-border/30">
             {clusters.map((c) => (
-              <tr key={c.id} className="hover:bg-muted/20 transition-colors">
-                <td className="px-4 py-3 font-medium">{c.name}</td>
-                <td className="px-4 py-3">
-                  <StateBadge state={c.state} />
-                </td>
-                <td className="px-4 py-3">
-                  <ProviderBadge provider={c.provider ?? "aws"} />
-                </td>
-                <td className="px-4 py-3 text-muted-foreground font-mono text-[12px]">
-                  {c.aws_region}
-                </td>
-                <td className="px-4 py-3 text-muted-foreground tabular-nums">
-                  {workerCount(c)}
-                </td>
-                <td className="px-4 py-3 text-muted-foreground tabular-nums">
-                  {ageSince(c.created_at)}
-                </td>
-                <td className="px-4 py-3 text-muted-foreground tabular-nums">
-                  {monthlyCost(c)}
-                </td>
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-1 justify-end">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 px-2 text-[12px]"
-                      onClick={() => navigate(`/cluster/${c.id}`)}
-                    >
-                      <ExternalLink className="h-3 w-3 mr-1" />
-                      Open
-                    </Button>
-                    {c.state === "ready" && (
+              <>
+                <tr
+                  key={c.id}
+                  className={cn(
+                    "hover:bg-muted/20 transition-colors",
+                    confirmDelete === c.id && "bg-destructive/5",
+                  )}
+                >
+                  <td className="px-4 py-3 font-medium">{c.name}</td>
+                  <td className="px-4 py-3">
+                    <StateBadge state={c.state} />
+                  </td>
+                  <td className="px-4 py-3">
+                    <ProviderBadge provider={c.provider ?? "aws"} />
+                  </td>
+                  <td className="px-4 py-3 text-muted-foreground font-mono text-[12px]">
+                    {c.aws_region}
+                  </td>
+                  <td className="px-4 py-3 text-muted-foreground tabular-nums">
+                    {workerCount(c)}
+                  </td>
+                  <td className="px-4 py-3 text-muted-foreground tabular-nums">
+                    {ageSince(c.created_at)}
+                  </td>
+                  <td className="px-4 py-3 text-muted-foreground tabular-nums">
+                    {monthlyCost(c)}
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-1 justify-end">
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="h-7 px-2 text-[12px] text-destructive hover:text-destructive hover:bg-destructive/10"
-                        onClick={() => handleDestroy(c)}
-                        disabled={destroying === c.id}
+                        className="h-7 px-2 text-[12px]"
+                        onClick={() => navigate(`/cluster/${c.id}`)}
                       >
-                        <Trash2 className="h-3 w-3 mr-1" />
-                        {destroying === c.id ? "Starting…" : "Destroy"}
+                        <ExternalLink className="h-3 w-3 mr-1" />
+                        Open
                       </Button>
-                    )}
-                    {(c.state === "destroyed" || c.state === "failed" || c.state === "draft") && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 px-2 text-[12px] text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                        onClick={() => handleDelete(c)}
-                        disabled={deleting === c.id}
-                        title="Remove this record from the database"
-                      >
-                        <Trash2 className="h-3 w-3 mr-1" />
-                        {deleting === c.id ? "Deleting…" : "Delete"}
-                      </Button>
-                    )}
-                  </div>
-                </td>
-              </tr>
+                      {c.state === "ready" && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2 text-[12px] text-destructive hover:text-destructive hover:bg-destructive/10"
+                          onClick={() => handleDestroy(c)}
+                          disabled={destroying === c.id}
+                        >
+                          <Trash2 className="h-3 w-3 mr-1" />
+                          {destroying === c.id ? "Starting…" : "Destroy"}
+                        </Button>
+                      )}
+                      {deletableStates.has(c.state) && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className={cn(
+                            "h-7 px-2 text-[12px]",
+                            confirmDelete === c.id
+                              ? "text-destructive bg-destructive/10"
+                              : "text-muted-foreground hover:text-destructive hover:bg-destructive/10",
+                          )}
+                          onClick={() =>
+                            setConfirmDelete(
+                              confirmDelete === c.id ? null : c.id,
+                            )
+                          }
+                          disabled={deleting === c.id}
+                          title="Remove this record from the database"
+                        >
+                          <Trash2 className="h-3 w-3 mr-1" />
+                          Delete
+                        </Button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+                {confirmDelete === c.id && (
+                  <DeleteConfirm
+                    key={`${c.id}-confirm`}
+                    cluster={c}
+                    onConfirm={() => handleDeleteConfirmed(c.id)}
+                    onCancel={() => setConfirmDelete(null)}
+                    busy={deleting === c.id}
+                  />
+                )}
+              </>
             ))}
           </tbody>
         </table>

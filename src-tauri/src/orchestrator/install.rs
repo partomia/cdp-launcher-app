@@ -182,6 +182,30 @@ async fn run_install_inner(ctx: InstallCtx) -> Result<(), AppError> {
     for &phase in Phase::all() {
         let phase_key = phase.key();
 
+        // Skip FreeIPA when using an external directory (LDAP / AD).
+        if phase == Phase::MakeFreeipa && tfvars_cfg.directory_type != "freeipa" {
+            tracing::info!(
+                "skipping phase {phase_key} — directory_type={}",
+                tfvars_cfg.directory_type
+            );
+            let _ = ctx.app.emit(
+                "log-line",
+                &serde_json::json!({
+                    "cluster_id": ctx.cluster_id,
+                    "phase": phase_key,
+                    "stream": "pty",
+                    "line": format!("[skipped — directory_type={}, FreeIPA not required]",
+                        tfvars_cfg.directory_type),
+                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                }),
+            );
+            // Record as success so resume doesn't re-run it.
+            let now = chrono::Utc::now().to_rfc3339();
+            let event_id = ctx.store.start_phase_event(&ctx.cluster_id, phase_key, &now)?;
+            ctx.store.finish_phase_event(event_id, "success", &now, 0, None)?;
+            continue;
+        }
+
         // Skip phases that already completed successfully in a prior run.
         if ctx.store.phase_succeeded(&ctx.cluster_id, phase_key)? {
             tracing::info!("skipping phase {phase_key} — already succeeded");
