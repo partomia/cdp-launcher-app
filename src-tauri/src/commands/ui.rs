@@ -168,7 +168,7 @@ pub async fn open_cm_ui(
     store: State<'_, Arc<Store>>,
     cluster_id: String,
 ) -> Result<(), AppError> {
-    let (bastion_ip, _domain, key_name) = cluster_connection_info(&store, &cluster_id)?;
+    let (bastion_ip, domain, key_name) = cluster_connection_info(&store, &cluster_id)?;
     let home = dirs::home_dir().unwrap_or_default();
     let key_path = format!("{}/.ssh/{}.pem", home.display(), key_name);
 
@@ -179,15 +179,38 @@ pub async fn open_cm_ui(
         )
     })?;
 
+    // CM's Spring Security CSRF host check validates Origin/Referer against the server
+    // hostname. Accessing via https://localhost:7183 causes a 403 on /j_spring_security_check.
+    // Fix: ensure the browser uses the actual CM hostname (util1.<domain>) so CSRF passes.
+    // The SSH tunnel still carries the traffic — we just need /etc/hosts to resolve the name
+    // to 127.0.0.1.
+    let util1_fqdn = format!("util1.{domain}");
+    let hosts_entry = format!("127.0.0.1 {util1_fqdn}");
+    // Only append if not already present (idempotent, uses osascript for sudo on macOS)
+    let check_and_add = format!(
+        r#"grep -qF '{hosts_entry}' /etc/hosts || echo '{hosts_entry}' >> /etc/hosts"#
+    );
+    let _ = std::process::Command::new("osascript")
+        .args([
+            "-e",
+            &format!(
+                r#"do shell script "{}" with administrator privileges"#,
+                check_and_add.replace('"', r#"\""#)
+            ),
+        ])
+        .status();
+
     // Two-hop tunnel: local:7183 → bastion (ProxyCommand) → util1:7183
+    // We forward to util1_ip directly so the TLS certificate hostname (util1.<domain>) matches.
     let proxy_cmd = format!("ssh -i {key_path} -W %h:%p -q ec2-user@{bastion_ip}");
     let _tunnel = std::process::Command::new("ssh")
         .args([
             "-N",
             "-o", "ExitOnForwardFailure=yes",
+            "-o", "StrictHostKeyChecking=no",
             "-o", &format!("ProxyCommand={proxy_cmd}"),
             "-i", &key_path,
-            "-L", "7183:localhost:7183",
+            "-L", &format!("7183:{util1_ip}:7183"),
             &format!("ec2-user@{util1_ip}"),
         ])
         .spawn()
@@ -196,12 +219,13 @@ pub async fn open_cm_ui(
     // Give the tunnel a moment to establish
     tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
-    // Open browser
+    // Open browser using the real CM hostname — CSRF check will now pass
+    let cm_url = format!("https://{util1_fqdn}:7183/");
     let _ = std::process::Command::new("open")
-        .arg("https://localhost:7183/")
+        .arg(&cm_url)
         .spawn();
 
-    tracing::info!("opened CM UI tunnel to {util1_ip} via {bastion_ip}");
+    tracing::info!("opened CM UI tunnel to {util1_ip} ({util1_fqdn}) via {bastion_ip}");
     Ok(())
 }
 
