@@ -98,6 +98,8 @@ function PasswordInput({
 // ---------------------------------------------------------------------------
 
 interface WizardForm {
+  // Step 0: provider
+  provider: string;
   // Step 1: basics
   clusterName: string;
   repoPath: string;
@@ -116,6 +118,7 @@ interface WizardForm {
 }
 
 const INITIAL: WizardForm = {
+  provider: "aws",
   clusterName: "",
   repoPath: "",
   awsProfile: "",
@@ -130,11 +133,72 @@ const INITIAL: WizardForm = {
   dbRootPassword: "",
 };
 
-const STEPS = ["Basics", "Infrastructure", "Passwords", "Review"];
+const STEPS = ["Provider", "Basics", "Infrastructure", "Passwords", "Review"];
 
 // ---------------------------------------------------------------------------
 // Step panels
 // ---------------------------------------------------------------------------
+
+interface ProviderOption {
+  id: string;
+  label: string;
+  description: string;
+  available: boolean;
+}
+
+const PROVIDERS: ProviderOption[] = [
+  { id: "aws", label: "Amazon Web Services", description: "Deploy to AWS with Terraform + Ansible automation", available: true },
+  { id: "gcp", label: "Google Cloud Platform", description: "GCP support coming soon", available: false },
+  { id: "azure", label: "Microsoft Azure", description: "Azure support coming soon", available: false },
+  { id: "onprem", label: "On-Premises", description: "Bare-metal / on-prem support coming soon", available: false },
+];
+
+function Step0({
+  form,
+  setForm,
+}: {
+  form: WizardForm;
+  setForm: React.Dispatch<React.SetStateAction<WizardForm>>;
+}) {
+  return (
+    <div className="space-y-3">
+      <p className="text-[12px] text-muted-foreground mb-4">
+        Select the target cloud or infrastructure provider for this CDP deployment.
+      </p>
+      {PROVIDERS.map((p) => (
+        <button
+          key={p.id}
+          type="button"
+          disabled={!p.available}
+          onClick={() => p.available && setForm((f) => ({ ...f, provider: p.id }))}
+          className={cn(
+            "w-full text-left rounded-lg border px-4 py-3 transition-colors",
+            !p.available
+              ? "border-border/30 bg-muted/20 cursor-not-allowed opacity-50"
+              : form.provider === p.id
+                ? "border-primary bg-primary/5 ring-1 ring-primary"
+                : "border-border/60 hover:border-primary/50 hover:bg-muted/30",
+          )}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[13px] font-medium">{p.label}</span>
+            {!p.available && (
+              <span className="text-[10px] font-medium text-muted-foreground bg-muted rounded-full px-2 py-0.5">
+                Coming soon
+              </span>
+            )}
+            {p.available && form.provider === p.id && (
+              <span className="text-[10px] font-medium text-primary bg-primary/10 rounded-full px-2 py-0.5">
+                Selected
+              </span>
+            )}
+          </div>
+          <p className="text-[11px] text-muted-foreground mt-0.5">{p.description}</p>
+        </button>
+      ))}
+    </div>
+  );
+}
 
 function Step1({
   form,
@@ -287,8 +351,10 @@ function Step3({
   );
 }
 
-function Step4({ form }: { form: WizardForm }) {
+function Step5({ form }: { form: WizardForm }) {
+  const providerLabels: Record<string, string> = { aws: "Amazon Web Services", gcp: "Google Cloud Platform", azure: "Microsoft Azure", onprem: "On-Premises" };
   const rows: Array<[string, string]> = [
+    ["Provider", providerLabels[form.provider] ?? form.provider],
     ["Cluster name", form.clusterName],
     ["Repo path", form.repoPath],
     ["AWS profile", form.awsProfile],
@@ -333,16 +399,19 @@ function Step4({ form }: { form: WizardForm }) {
 
 function validateStep(step: number, form: WizardForm): string | null {
   if (step === 0) {
+    if (!form.provider) return "Select a provider";
+  }
+  if (step === 1) {
     if (!form.clusterName.trim()) return "Cluster name is required";
     if (!form.repoPath.trim()) return "Repo path is required";
     if (!form.awsProfile.trim()) return "AWS profile is required";
     if (!form.awsRegion.trim()) return "AWS region is required";
   }
-  if (step === 1) {
+  if (step === 2) {
     if (!form.sshKeyName.trim()) return "SSH key name is required";
     if (!form.operatorCidr.trim()) return "Operator CIDR is required";
   }
-  if (step === 2) {
+  if (step === 3) {
     if (!form.paywallUser.trim()) return "Paywall username is required";
     if (!form.paywallPass) return "Paywall password is required";
     if (!form.dsPassword) return "DS password is required";
@@ -374,9 +443,9 @@ export default function InstallWizard() {
       .catch(() => {});
   }, []);
 
-  // Detect public IP when user reaches step 2
+  // Detect public IP when user reaches Infrastructure step
   useEffect(() => {
-    if (step === 1 && !detectedIp) {
+    if (step === 2 && !detectedIp) {
       awsDetectPublicIp()
         .then(setDetectedIp)
         .catch(() => {});
@@ -435,6 +504,7 @@ export default function InstallWizard() {
         aws_profile: form.awsProfile.trim(),
         aws_region: form.awsRegion.trim(),
         tfvars_json: JSON.stringify(tfvars),
+        provider: form.provider,
       });
 
       // 3. Write secrets with real cluster ID
@@ -502,14 +572,15 @@ export default function InstallWizard() {
 
         {/* Step content */}
         <div className="rounded-xl border border-border/50 bg-card p-6 shadow-sm">
-          {step === 0 && (
+          {step === 0 && <Step0 form={form} setForm={setForm} />}
+          {step === 1 && (
             <Step1 form={form} setForm={setForm} profiles={profiles} />
           )}
-          {step === 1 && (
+          {step === 2 && (
             <Step2 form={form} setForm={setForm} detectedIp={detectedIp} />
           )}
-          {step === 2 && <Step3 form={form} setForm={setForm} />}
-          {step === 3 && <Step4 form={form} />}
+          {step === 3 && <Step3 form={form} setForm={setForm} />}
+          {step === 4 && <Step5 form={form} />}
         </div>
 
         {/* Validation / launch errors */}

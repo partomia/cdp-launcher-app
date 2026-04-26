@@ -34,6 +34,8 @@ pub struct Cluster {
     pub destroyed_at: Option<String>,
     pub tfvars_json: Option<String>,
     pub metadata_json: Option<String>,
+    /// "aws" | "gcp" | "azure" | "onprem"
+    pub provider: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,7 +57,12 @@ pub struct ClusterCreateInput {
     pub aws_profile: String,
     pub aws_region: String,
     pub tfvars_json: Option<String>,
+    /// "aws" | "gcp" | "azure" | "onprem" — defaults to "aws"
+    #[serde(default = "default_provider")]
+    pub provider: String,
 }
+
+fn default_provider() -> String { "aws".to_string() }
 
 // ---------------------------------------------------------------------------
 // Store
@@ -100,7 +107,7 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, name, repo_path, aws_profile, aws_region, state,
-                    created_at, destroyed_at, tfvars_json, metadata_json
+                    created_at, destroyed_at, tfvars_json, metadata_json, provider
              FROM clusters ORDER BY created_at DESC",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -115,6 +122,7 @@ impl Store {
                 destroyed_at: row.get(7)?,
                 tfvars_json: row.get(8)?,
                 metadata_json: row.get(9)?,
+                provider: row.get::<_, Option<String>>(10)?.unwrap_or_else(|| "aws".into()),
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(AppError::Database)
@@ -124,7 +132,7 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         conn.query_row(
             "SELECT id, name, repo_path, aws_profile, aws_region, state,
-                    created_at, destroyed_at, tfvars_json, metadata_json
+                    created_at, destroyed_at, tfvars_json, metadata_json, provider
              FROM clusters WHERE id = ?1",
             params![id],
             |row| Ok(Cluster {
@@ -138,6 +146,7 @@ impl Store {
                 destroyed_at: row.get(7)?,
                 tfvars_json: row.get(8)?,
                 metadata_json: row.get(9)?,
+                provider: row.get::<_, Option<String>>(10)?.unwrap_or_else(|| "aws".into()),
             }),
         )
         .map_err(|e| match e {
@@ -151,8 +160,8 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT INTO clusters (id, name, repo_path, aws_profile, aws_region,
-                                   state, created_at, tfvars_json)
-             VALUES (?1, ?2, ?3, ?4, ?5, 'draft', ?6, ?7)",
+                                   state, created_at, tfvars_json, provider)
+             VALUES (?1, ?2, ?3, ?4, ?5, 'draft', ?6, ?7, ?8)",
             params![
                 id,
                 input.name,
@@ -161,6 +170,7 @@ impl Store {
                 input.aws_region,
                 now,
                 input.tfvars_json,
+                input.provider,
             ],
         )?;
         Ok(Cluster {
@@ -174,6 +184,7 @@ impl Store {
             destroyed_at: None,
             tfvars_json: input.tfvars_json.clone(),
             metadata_json: None,
+            provider: input.provider.clone(),
         })
     }
 
@@ -330,6 +341,17 @@ impl Store {
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(false),
             Err(e) => Err(AppError::Database(e)),
         }
+    }
+
+    /// Delete all phase_events for a phase so the orchestrator will re-run it on resume.
+    pub fn reset_phase(&self, cluster_id: &str, phase: &str) -> Result<(), AppError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "DELETE FROM phase_events WHERE cluster_id=?1 AND phase=?2",
+            params![cluster_id, phase],
+        )
+        .map_err(AppError::Database)?;
+        Ok(())
     }
 
     pub fn list_phase_events_for_cluster(&self, cluster_id: &str) -> Result<Vec<PhaseEvent>, AppError> {

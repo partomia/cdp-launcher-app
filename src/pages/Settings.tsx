@@ -6,7 +6,10 @@ import {
   settingsSet,
   forgetAllSecrets,
   deleteAllClusters,
+  licenseInfo,
+  licenseActivate,
 } from "@/lib/tauri";
+import type { LicenseInfo } from "@/lib/tauri";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -73,13 +76,40 @@ export default function Settings() {
   const [dangerMsg, setDangerMsg] = useState<string | null>(null);
   const [dataDir, setDataDir] = useState("");
 
+  // License state
+  const [license, setLicense] = useState<LicenseInfo | null>(null);
+  const [licenseToken, setLicenseToken] = useState("");
+  const [licenseActivating, setLicenseActivating] = useState(false);
+  const [licenseMsg, setLicenseMsg] = useState<{ text: string; ok: boolean } | null>(null);
+
   useEffect(() => {
     settingsGet()
       .then(setSettings)
       .catch(() => {});
     // Data directory is stable based on macOS convention
     setDataDir(`~/Library/Application Support/com.partomia.cdp-launcher`);
+    licenseInfo().then(setLicense).catch(() => {});
   }, []);
+
+  async function handleLicenseActivate() {
+    if (!licenseToken.trim()) return;
+    setLicenseActivating(true);
+    setLicenseMsg(null);
+    try {
+      const info = await licenseActivate(licenseToken.trim());
+      setLicense(info);
+      setLicenseToken("");
+      setLicenseMsg({ text: `License activated for ${info.user} (${info.org}) — expires ${info.expires}`, ok: true });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message
+        : typeof e === "object" && e !== null && "message" in e
+          ? String((e as { message: unknown }).message)
+          : String(e);
+      setLicenseMsg({ text: `Error: ${msg}`, ok: false });
+    } finally {
+      setLicenseActivating(false);
+    }
+  }
 
   function set(key: string, value: string) {
     setSettings((s) => ({ ...s, [key]: value }));
@@ -176,6 +206,64 @@ export default function Settings() {
           Secrets are stored in the macOS Keychain under service{" "}
           <code className="font-mono">com.partomia.cdp-launcher</code>.
         </p>
+      </section>
+
+      {/* License */}
+      <section className="space-y-4">
+        <h2 className="text-[14px] font-semibold">License</h2>
+
+        {license?.valid ? (
+          <div className="rounded-lg border border-green-500/40 bg-green-50/30 dark:bg-green-950/20 divide-y divide-border/50 text-[13px]">
+            {[
+              ["Status", "Active"],
+              ["User", license.user],
+              ["Organisation", license.org],
+              ["Issued", license.issued],
+              ["Expires", license.expires],
+              ["Days remaining", String(license.days_remaining)],
+            ].map(([label, value]) => (
+              <div key={label} className="flex px-4 py-2 gap-4">
+                <span className="w-28 text-muted-foreground flex-shrink-0">{label}</span>
+                <span className="font-mono text-[12px]">{value}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-[13px]">
+            <p className="font-medium text-destructive mb-0.5">No valid license</p>
+            <p className="text-[12px] text-muted-foreground">
+              {license?.error ?? "Activate a license token below to use this app."}
+            </p>
+          </div>
+        )}
+
+        <Field label="Activate license token" hint="Paste the license token you received from Partomia">
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={licenseToken}
+              onChange={(e) => setLicenseToken(e.target.value)}
+              placeholder="eyJ…"
+              className={cn(
+                "flex-1 rounded-md border border-border bg-background px-3 py-2 text-[13px] outline-none",
+                "focus:ring-1 focus:ring-ring placeholder:text-muted-foreground/60 font-mono",
+              )}
+            />
+            <Button
+              size="sm"
+              onClick={handleLicenseActivate}
+              disabled={licenseActivating || !licenseToken.trim()}
+            >
+              {licenseActivating ? "Activating…" : "Activate"}
+            </Button>
+          </div>
+        </Field>
+
+        {licenseMsg && (
+          <p className={cn("text-[12px]", licenseMsg.ok ? "text-green-600 dark:text-green-400" : "text-destructive")}>
+            {licenseMsg.text}
+          </p>
+        )}
       </section>
 
       {/* Danger zone */}

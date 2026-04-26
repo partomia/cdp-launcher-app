@@ -82,44 +82,91 @@ export function PhaseTracker({
     eventMap[ev.phase] = ev;
   }
 
+  // Known phase keys so we can detect extras (e.g. make_tf_destroy)
+  const knownKeys = new Set<string>(PHASE_DEFS.map((d) => d.key));
+
+  // Extra phases present in DB but not in PHASE_DEFS (destroy, remediation, …)
+  const extraPhases = events
+    .filter((ev) => !knownKeys.has(ev.phase))
+    .reduce<PhaseEvent[]>((acc, ev) => {
+      if (!acc.find((e) => e.phase === ev.phase)) acc.push(ev);
+      return acc;
+    }, []);
+
+  const EXTRA_LABELS: Record<string, string> = {
+    make_tf_destroy: "Terraform Destroy",
+    remediation: "Remediation",
+  };
+
+  function PhaseRow({
+    phaseKey,
+    label,
+    ev,
+    disabled,
+  }: {
+    phaseKey: string;
+    label: string;
+    ev: PhaseEvent | undefined;
+    disabled?: boolean;
+  }) {
+    const status = ev?.status ?? "queued";
+    const isSelected = selectedPhase === phaseKey;
+    return (
+      <button
+        onClick={() => ev && onSelectPhase(phaseKey)}
+        disabled={disabled ?? !ev}
+        className={cn(
+          "w-full flex items-center gap-3 px-3 py-2 rounded-md text-left transition-colors",
+          isSelected
+            ? "bg-primary/10 text-primary"
+            : "hover:bg-accent disabled:opacity-40 disabled:cursor-default",
+        )}
+      >
+        <StatusIcon status={status} />
+        <span className="flex-1 text-[13px] font-medium">{label}</span>
+        {ev && (
+          <span className="text-[11px] text-muted-foreground tabular-nums">
+            {elapsedLabel(ev.started_at, ev.finished_at)}
+          </span>
+        )}
+        {ev?.error_summary && (
+          <span
+            className="text-[11px] text-destructive truncate max-w-[140px]"
+            title={ev.error_summary}
+          >
+            {ev.error_summary}
+          </span>
+        )}
+      </button>
+    );
+  }
+
   return (
     <div className="space-y-0.5">
-      {PHASE_DEFS.map(({ key, label }) => {
-        const ev = eventMap[key];
-        const status = ev?.status ?? "queued";
-        const isSelected = selectedPhase === key;
-        const hasEvent = !!ev;
+      {PHASE_DEFS.map(({ key, label }) => (
+        <PhaseRow
+          key={key}
+          phaseKey={key}
+          label={label}
+          ev={eventMap[key]}
+        />
+      ))}
 
-        return (
-          <button
-            key={key}
-            onClick={() => hasEvent && onSelectPhase(key)}
-            disabled={!hasEvent}
-            className={cn(
-              "w-full flex items-center gap-3 px-3 py-2 rounded-md text-left transition-colors",
-              isSelected
-                ? "bg-primary/10 text-primary"
-                : "hover:bg-accent disabled:opacity-40 disabled:cursor-default",
-            )}
-          >
-            <StatusIcon status={status} />
-            <span className="flex-1 text-[13px] font-medium">{label}</span>
-            {ev && (
-              <span className="text-[11px] text-muted-foreground tabular-nums">
-                {elapsedLabel(ev.started_at, ev.finished_at)}
-              </span>
-            )}
-            {ev?.error_summary && (
-              <span
-                className="text-[11px] text-destructive truncate max-w-[140px]"
-                title={ev.error_summary}
-              >
-                {ev.error_summary}
-              </span>
-            )}
-          </button>
-        );
-      })}
+      {/* Extra phases (destroy, remediation, …) — shown only when they have events */}
+      {extraPhases.length > 0 && (
+        <>
+          <div className="mx-3 my-1 border-t border-border/40" />
+          {extraPhases.map((ev) => (
+            <PhaseRow
+              key={ev.phase}
+              phaseKey={ev.phase}
+              label={EXTRA_LABELS[ev.phase] ?? ev.phase}
+              ev={ev}
+            />
+          ))}
+        </>
+      )}
+
       {/* Invisible dependency on tick to keep elapsed times updating */}
       <span className="sr-only">{tick}</span>
     </div>

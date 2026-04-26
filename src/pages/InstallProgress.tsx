@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { Loader2, XCircle, CheckCircle, StopCircle, RotateCcw } from "lucide-react";
+import { Loader2, XCircle, CheckCircle, StopCircle, RotateCcw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { installCancel, installStart, clusterGet } from "@/lib/tauri";
+import { installCancel, installStart, destroyStart, clusterGet, clusterPhaseEvents } from "@/lib/tauri";
 import { PhaseTracker } from "@/components/PhaseTracker";
 import { LogPane } from "@/components/LogPane";
 import { ErrorHintBanner } from "@/components/ErrorHintBanner";
@@ -48,6 +48,8 @@ export function InstallProgress({ cluster, onClusterChange }: Props) {
   const [selectedPhase, setSelectedPhase] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [resuming, setResuming] = useState(false);
+  const [retryingDestroy, setRetryingDestroy] = useState(false);
+  const [phaseEvents, setPhaseEvents] = useState<import("@/lib/types").PhaseEvent[]>([]);
   const [elapsed, setElapsed] = useState(() =>
     elapsedSince(cluster.created_at),
   );
@@ -65,6 +67,24 @@ export function InstallProgress({ cluster, onClusterChange }: Props) {
     );
     return () => clearInterval(id);
   }, [isActive, cluster.created_at]);
+
+  // Load phase events so we can detect destroy failures
+  useEffect(() => {
+    clusterPhaseEvents(cluster.id)
+      .then(setPhaseEvents)
+      .catch(() => {});
+  }, [cluster.id, cluster.state]);
+
+  // True only when the most recent phase event is the destroy phase.
+  // Using .some() would incorrectly match old destroy events on a cluster
+  // that has since been resumed for install.
+  const isDestroyFailure = (() => {
+    if (phaseEvents.length === 0) return false;
+    const sorted = [...phaseEvents].sort(
+      (a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime(),
+    );
+    return sorted[0].phase === "make_tf_destroy";
+  })();
 
   // Refresh cluster record when install or destroy finishes
   useEffect(() => {
@@ -107,6 +127,15 @@ export function InstallProgress({ cluster, onClusterChange }: Props) {
     setResuming(false);
   }
 
+  async function handleRetryDestroy() {
+    setRetryingDestroy(true);
+    try {
+      await destroyStart(cluster.id);
+      onClusterChange(await clusterGet(cluster.id));
+    } catch {}
+    setRetryingDestroy(false);
+  }
+
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
@@ -128,7 +157,7 @@ export function InstallProgress({ cluster, onClusterChange }: Props) {
         </span>
 
         <div className="ml-auto flex gap-2">
-          {(cluster.state === "failed" || cluster.state === "installing") && (
+          {(cluster.state === "failed" || cluster.state === "installing") && !isDestroyFailure && (
             <Button
               variant="outline"
               size="sm"
@@ -137,6 +166,17 @@ export function InstallProgress({ cluster, onClusterChange }: Props) {
             >
               <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
               {resuming ? "Starting…" : "Resume install"}
+            </Button>
+          )}
+          {cluster.state === "failed" && isDestroyFailure && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRetryDestroy}
+              disabled={retryingDestroy}
+            >
+              <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+              {retryingDestroy ? "Starting…" : "Retry destroy"}
             </Button>
           )}
           {isActive && (

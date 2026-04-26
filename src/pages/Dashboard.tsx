@@ -4,7 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { PlusCircle, RefreshCw, Trash2, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { clusterList, destroyStart } from "@/lib/tauri";
+import { clusterList, clusterDeleteMetadata, destroyStart } from "@/lib/tauri";
 import type { Cluster, TfvarsConfig } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
@@ -97,6 +97,31 @@ function StateBadge({ state }: { state: string }) {
   );
 }
 
+function ProviderBadge({ provider }: { provider: string }) {
+  const labels: Record<string, string> = {
+    aws: "AWS",
+    gcp: "GCP",
+    azure: "Azure",
+    onprem: "On-Prem",
+  };
+  const colors: Record<string, string> = {
+    aws: "bg-orange-100 text-orange-700 dark:bg-orange-950 dark:text-orange-300",
+    gcp: "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300",
+    azure: "bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300",
+    onprem: "bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300",
+  };
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium",
+        colors[provider] ?? "bg-muted text-muted-foreground",
+      )}
+    >
+      {labels[provider] ?? provider}
+    </span>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Dashboard
 // ---------------------------------------------------------------------------
@@ -106,6 +131,7 @@ export default function Dashboard() {
   const [clusters, setClusters] = useState<Cluster[]>([]);
   const [loading, setLoading] = useState(true);
   const [destroying, setDestroying] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -141,6 +167,19 @@ export default function Dashboard() {
     } catch (e: unknown) {
       alert(e instanceof Error ? e.message : String(e));
       setDestroying(null);
+    }
+  }
+
+  async function handleDelete(cluster: Cluster) {
+    if (!confirm(`Delete record for "${cluster.name}"? This only removes the database entry — no AWS resources are affected.`)) return;
+    setDeleting(cluster.id);
+    try {
+      await clusterDeleteMetadata(cluster.id);
+      await load();
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDeleting(null);
     }
   }
 
@@ -201,6 +240,7 @@ export default function Dashboard() {
               {[
                 "Name",
                 "State",
+                "Provider",
                 "Region",
                 "Workers",
                 "Age",
@@ -222,6 +262,9 @@ export default function Dashboard() {
                 <td className="px-4 py-3 font-medium">{c.name}</td>
                 <td className="px-4 py-3">
                   <StateBadge state={c.state} />
+                </td>
+                <td className="px-4 py-3">
+                  <ProviderBadge provider={c.provider ?? "aws"} />
                 </td>
                 <td className="px-4 py-3 text-muted-foreground font-mono text-[12px]">
                   {c.aws_region}
@@ -256,6 +299,19 @@ export default function Dashboard() {
                       >
                         <Trash2 className="h-3 w-3 mr-1" />
                         {destroying === c.id ? "Starting…" : "Destroy"}
+                      </Button>
+                    )}
+                    {(c.state === "destroyed" || c.state === "failed" || c.state === "draft") && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 text-[12px] text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                        onClick={() => handleDelete(c)}
+                        disabled={deleting === c.id}
+                        title="Remove this record from the database"
+                      >
+                        <Trash2 className="h-3 w-3 mr-1" />
+                        {deleting === c.id ? "Deleting…" : "Delete"}
                       </Button>
                     )}
                   </div>

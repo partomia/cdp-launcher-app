@@ -376,6 +376,13 @@ async fn run_install_inner(ctx: InstallCtx) -> Result<(), AppError> {
                 exit_code,
                 Some(&summary),
             )?;
+            // If apply failed, also wipe the plan phase so resume re-plans.
+            // A failed apply invalidates the plan (stale state, partial changes).
+            if phase == Phase::TerraformApply {
+                ctx.store.reset_phase(&ctx.cluster_id, Phase::TerraformPlan.key())?;
+                // Remove the physical plan file so terraform plan produces a fresh one.
+                let _ = std::fs::remove_file(tf_dir.join("cdp732.tfplan"));
+            }
             ctx.store.update_cluster_state(&ctx.cluster_id, "failed")?;
             tracing::error!("phase {phase_key} failed (exit {exit_code}) — stopping install");
             return Ok(());

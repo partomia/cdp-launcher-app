@@ -14,6 +14,8 @@ export interface Cluster {
   destroyed_at: string | null;
   tfvars_json: string | null;
   metadata_json: string | null;
+  /** "aws" | "gcp" | "azure" | "onprem" */
+  provider: string;
 }
 
 export interface PhaseEvent {
@@ -34,6 +36,22 @@ export interface ClusterCreateInput {
   aws_profile: string;
   aws_region: string;
   tfvars_json?: string;
+  /** "aws" | "gcp" | "azure" | "onprem" — defaults to "aws" */
+  provider?: string;
+}
+
+// ---------------------------------------------------------------------------
+// License
+// ---------------------------------------------------------------------------
+
+export interface LicenseInfo {
+  valid: boolean;
+  user: string;
+  org: string;
+  issued: string;
+  expires: string;
+  days_remaining: number;
+  error: string | null;
 }
 
 /** Non-secret terraform variable values — serialised into clusters.tfvars_json */

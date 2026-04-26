@@ -18,6 +18,7 @@ import {
   clusterPhaseEvents,
   keychainGet,
   openCmUi,
+  openCmTunnel,
   openSshTerminal,
   clusterEnvVars,
   destroyStart,
@@ -382,6 +383,7 @@ function ReadyView({
   const [showDestroy, setShowDestroy] = useState(false);
   const [destroying, setDestroying] = useState(false);
   const [cmBusy, setCmBusy] = useState(false);
+  const [tunnelBusy, setTunnelBusy] = useState(false);
   const [sshBusy, setSshBusy] = useState(false);
   const [copyBusy, setCopyBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -490,6 +492,18 @@ function ReadyView({
           >
             <Terminal className="h-3.5 w-3.5 mr-1.5" />
             SSH to bastion
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={tunnelBusy || !bastionIp}
+            title={!bastionIp ? "Bastion IP not yet available" : undefined}
+            onClick={() =>
+              doAction(() => openCmTunnel(cluster.id), setTunnelBusy)
+            }
+          >
+            <Terminal className="h-3.5 w-3.5 mr-1.5" />
+            {tunnelBusy ? "Opening tunnel…" : "CM Tunnel"}
           </Button>
           <Button
             variant="outline"

@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use tauri::{AppHandle, Emitter};
+use serde_json;
 
 use crate::error::AppError;
 use crate::runner::{execute_command, CommandRun, RunnerState};
@@ -20,8 +21,23 @@ pub struct DestroyCtx {
 }
 
 pub async fn run_destroy(ctx: DestroyCtx) {
+    let app = ctx.app.clone();
+    let store = Arc::clone(&ctx.store);
+    let cluster_id = ctx.cluster_id.clone();
+
     if let Err(e) = run_destroy_inner(ctx).await {
         tracing::error!("destroy failed: {e}");
+        let _ = app.emit(
+            "log-line",
+            &serde_json::json!({
+                "cluster_id": cluster_id,
+                "phase": "make_tf_destroy",
+                "stream": "pty",
+                "line": format!("[ORCHESTRATOR ERROR] {e}"),
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+            }),
+        );
+        let _ = store.update_cluster_state(&cluster_id, "failed");
     }
 }
 
@@ -32,11 +48,16 @@ async fn run_destroy_inner(ctx: DestroyCtx) -> Result<(), AppError> {
     ctx.store.update_cluster_state(&ctx.cluster_id, "destroying")?;
     let event_id = ctx.store.start_phase_event(&ctx.cluster_id, phase_key, &now)?;
 
+    // Prepend homebrew paths so make/terraform are found when launched from .app bundle
+    let inherited_path = std::env::var("PATH").unwrap_or_default();
+    let tool_paths = "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin";
+    let full_path = format!("{tool_paths}:{inherited_path}");
+
     let mut env = HashMap::new();
+    env.insert("PATH".into(), full_path);
     env.insert("AWS_PROFILE".into(), ctx.aws_profile.clone());
     env.insert("AWS_DEFAULT_REGION".into(), ctx.aws_region.clone());
-    // Keep the installer repo's target, but force Terraform destroy to run
-    // non-interactively so the desktop workflow does not hang at a prompt.
+    // Force Terraform destroy to run non-interactively so it does not hang at a prompt.
     env.insert("TF_CLI_ARGS_destroy".into(), "-auto-approve".into());
 
     let exit_code = execute_command(

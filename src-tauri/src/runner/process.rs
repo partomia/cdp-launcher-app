@@ -111,12 +111,20 @@ pub async fn execute_command(
             cmd.arg(arg);
         }
         cmd.cwd(&run.cwd);
-        // portable-pty only sets the env vars you provide, so we must
-        // seed with the current process environment first, then overlay.
-        for (k, v) in std::env::vars_os() {
-            cmd.env(k, v);
-        }
+        // Build a deduplicated env map: start with the current process env,
+        // then overlay the caller's overrides.  Using a HashMap ensures that
+        // if the same key appears twice (e.g. PATH), the override wins and
+        // posix_spawn never receives duplicate env entries (which on macOS
+        // causes the *first* value to be used, silently ignoring our PATH fix).
+        let mut env_map: std::collections::HashMap<std::ffi::OsString, std::ffi::OsString> =
+            std::env::vars_os().collect();
         for (k, v) in &run.env {
+            env_map.insert(
+                std::ffi::OsString::from(k),
+                std::ffi::OsString::from(v),
+            );
+        }
+        for (k, v) in &env_map {
             cmd.env(k, v);
         }
 

@@ -6,7 +6,7 @@ mod state;
 
 use std::sync::Arc;
 
-use commands::{aws, cluster, install, keychain, ui};
+use commands::{aws, cluster, install, keychain, license, ui};
 use runner::RunnerState;
 use state::Store;
 
@@ -56,6 +56,10 @@ pub fn run() {
             install::install_cancel,
             install::destroy_start,
             install::logs_fetch,
+            // License
+            license::license_info,
+            license::license_activate,
+            license::license_check,
             // Settings + UI helpers
             ui::settings_get,
             ui::settings_set,
@@ -63,6 +67,7 @@ pub fn run() {
             ui::delete_all_clusters,
             ui::cluster_env_vars,
             ui::open_cm_ui,
+            ui::open_cm_tunnel,
             ui::open_ssh_terminal,
             ui::run_remediation,
         ])

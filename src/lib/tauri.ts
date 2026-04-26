@@ -4,6 +4,7 @@ import type {
   CallerIdentity,
   Cluster,
   ClusterCreateInput,
+  LicenseInfo,
   LogLine,
   PhaseEvent,
 } from "./types";
@@ -120,6 +121,9 @@ export const clusterEnvVars = (clusterId: string): Promise<string> =>
 export const openCmUi = (clusterId: string): Promise<void> =>
   call("open_cm_ui", { clusterId });
 
+export const openCmTunnel = (clusterId: string): Promise<void> =>
+  call("open_cm_tunnel", { clusterId });
+
 export const openSshTerminal = (clusterId: string): Promise<void> =>
   call("open_ssh_terminal", { clusterId });
 
@@ -127,6 +131,17 @@ export const runRemediation = (
   clusterId: string,
   command: string,
 ): Promise<void> => call("run_remediation", { clusterId, command });
+
+// ---------------------------------------------------------------------------
+// License
+// ---------------------------------------------------------------------------
+
+export const licenseCheck = (): Promise<boolean> => call("license_check");
+
+export const licenseInfo = (): Promise<LicenseInfo> => call("license_info");
+
+export const licenseActivate = (token: string): Promise<LicenseInfo> =>
+  call("license_activate", { token });
 
 // ---------------------------------------------------------------------------
 // Re-exports
@@ -137,6 +152,7 @@ export type {
   CallerIdentity,
   Cluster,
   ClusterCreateInput,
+  LicenseInfo,
   LogLine,
   PhaseEvent,
 };

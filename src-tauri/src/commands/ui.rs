@@ -88,6 +88,37 @@ pub fn cluster_env_vars(
 // Open CM UI via SSH tunnel
 // ---------------------------------------------------------------------------
 
+/// Parse ansible/inventory/prod.ini and return the `ansible_host` IP of the util node.
+fn util1_private_ip_from_inventory(repo_path: &str) -> Option<String> {
+    let inv_path = std::path::PathBuf::from(repo_path)
+        .join("ansible")
+        .join("inventory")
+        .join("prod.ini");
+    let content = std::fs::read_to_string(&inv_path).ok()?;
+
+    let mut in_util_section = false;
+    for line in content.lines() {
+        let line = line.trim();
+        if line == "[util]" {
+            in_util_section = true;
+            continue;
+        }
+        if line.starts_with('[') {
+            in_util_section = false;
+            continue;
+        }
+        if in_util_section && !line.is_empty() && !line.starts_with('#') {
+            // Format: "util1.cdp.prod.internal ansible_host=10.42.10.XX ..."
+            for part in line.split_whitespace() {
+                if let Some(ip) = part.strip_prefix("ansible_host=") {
+                    return Some(ip.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
 /// Builds the cluster metadata (bastion_ip, domain) from stored JSON fields.
 fn cluster_connection_info(
     store: &Store,
@@ -137,19 +168,27 @@ pub async fn open_cm_ui(
     store: State<'_, Arc<Store>>,
     cluster_id: String,
 ) -> Result<(), AppError> {
-    let (bastion_ip, domain, key_name) = cluster_connection_info(&store, &cluster_id)?;
-    let key_path = format!("{}/.ssh/{}", dirs::home_dir().unwrap_or_default().display(), key_name);
-    let util1_host = format!("util1.{domain}");
+    let (bastion_ip, _domain, key_name) = cluster_connection_info(&store, &cluster_id)?;
+    let home = dirs::home_dir().unwrap_or_default();
+    let key_path = format!("{}/.ssh/{}.pem", home.display(), key_name);
 
-    // Spawn SSH tunnel in background (fire-and-forget)
+    let cluster = store.get_cluster(&cluster_id)?;
+    let util1_ip = util1_private_ip_from_inventory(&cluster.repo_path).ok_or_else(|| {
+        AppError::Other(
+            "util1 private IP not found in inventory — run 'make inventory' first".to_string(),
+        )
+    })?;
+
+    // Two-hop tunnel: local:7183 → bastion (ProxyCommand) → util1:7183
+    let proxy_cmd = format!("ssh -i {key_path} -W %h:%p -q ec2-user@{bastion_ip}");
     let _tunnel = std::process::Command::new("ssh")
         .args([
-            "-L", &format!("7183:{util1_host}:7183"),
             "-N",
-            "-o", "StrictHostKeyChecking=no",
-            "-o", "ExitOnForwardFailure=no",
+            "-o", "ExitOnForwardFailure=yes",
+            "-o", &format!("ProxyCommand={proxy_cmd}"),
             "-i", &key_path,
-            &format!("ec2-user@{bastion_ip}"),
+            "-L", "7183:localhost:7183",
+            &format!("ec2-user@{util1_ip}"),
         ])
         .spawn()
         .map_err(AppError::Io)?;
@@ -162,7 +201,45 @@ pub async fn open_cm_ui(
         .arg("https://localhost:7183/")
         .spawn();
 
-    tracing::info!("opened CM UI tunnel to {util1_host} via {bastion_ip}");
+    tracing::info!("opened CM UI tunnel to {util1_ip} via {bastion_ip}");
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Open CM tunnel in a visible Terminal window
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn open_cm_tunnel(
+    store: State<'_, Arc<Store>>,
+    cluster_id: String,
+) -> Result<(), AppError> {
+    let (bastion_ip, _domain, key_name) = cluster_connection_info(&store, &cluster_id)?;
+    let home = dirs::home_dir().unwrap_or_default();
+    let key_path = format!("{}/.ssh/{}.pem", home.display(), key_name);
+
+    let cluster = store.get_cluster(&cluster_id)?;
+    let util1_ip = util1_private_ip_from_inventory(&cluster.repo_path).ok_or_else(|| {
+        AppError::Other(
+            "util1 private IP not found in inventory — run 'make inventory' first".to_string(),
+        )
+    })?;
+
+    // Build a shell command for the Terminal window.
+    // Single-quoting the ProxyCommand value prevents the shell from splitting it.
+    let ssh_cmd = format!(
+        "ssh -N -o ExitOnForwardFailure=yes \
+         -o 'ProxyCommand=ssh -i {key_path} -W %h:%p -q ec2-user@{bastion_ip}' \
+         -i {key_path} -L 7183:localhost:7183 ec2-user@{util1_ip}"
+    );
+    let script = format!(r#"tell application "Terminal" to do script "{ssh_cmd}""#);
+    std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(&script)
+        .spawn()
+        .map_err(AppError::Io)?;
+
+    tracing::info!("opened CM tunnel terminal to {util1_ip} via {bastion_ip}");
     Ok(())
 }
 
@@ -176,7 +253,7 @@ pub fn open_ssh_terminal(
     cluster_id: String,
 ) -> Result<(), AppError> {
     let (bastion_ip, _domain, key_name) = cluster_connection_info(&store, &cluster_id)?;
-    let key_path = format!("~/.ssh/{key_name}");
+    let key_path = format!("~/.ssh/{key_name}.pem");
     let ssh_cmd = format!("ssh -i {key_path} ec2-user@{bastion_ip}");
     let script = format!(
         r#"tell application "Terminal" to do script "{ssh_cmd}""#
