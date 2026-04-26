@@ -50,6 +50,18 @@ pub struct PhaseEvent {
     pub error_summary: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClusterTemplate {
+    pub id: String,
+    pub cluster_id: String,
+    pub label: String,
+    pub cm_cluster_name: String,
+    pub captured_at: String,
+    /// Comma-separated service types, e.g. "HDFS,YARN,HIVE,RANGER"
+    pub services: String,
+    pub template_json: String,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct ClusterCreateInput {
     pub name: String,
@@ -383,5 +395,87 @@ impl Store {
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(AppError::Database)
+    }
+
+    // -----------------------------------------------------------------------
+    // Cluster templates
+    // -----------------------------------------------------------------------
+
+    pub fn insert_cluster_template(
+        &self,
+        id: &str,
+        cluster_id: &str,
+        label: &str,
+        cm_cluster_name: &str,
+        captured_at: &str,
+        services: &str,
+        template_json: &str,
+    ) -> Result<(), AppError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO cluster_templates
+             (id, cluster_id, label, cm_cluster_name, captured_at, services, template_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![id, cluster_id, label, cm_cluster_name, captured_at, services, template_json],
+        )
+        .map_err(AppError::Database)?;
+        Ok(())
+    }
+
+    pub fn list_cluster_templates(&self, cluster_id: &str) -> Result<Vec<ClusterTemplate>, AppError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, cluster_id, label, cm_cluster_name, captured_at, services, template_json
+             FROM cluster_templates WHERE cluster_id = ?1 ORDER BY captured_at DESC",
+        )?;
+        let rows = stmt.query_map(params![cluster_id], |row| {
+            Ok(ClusterTemplate {
+                id: row.get(0)?,
+                cluster_id: row.get(1)?,
+                label: row.get(2)?,
+                cm_cluster_name: row.get(3)?,
+                captured_at: row.get(4)?,
+                services: row.get(5)?,
+                template_json: row.get(6)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(AppError::Database)
+    }
+
+    pub fn get_cluster_template(&self, id: &str) -> Result<ClusterTemplate, AppError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, cluster_id, label, cm_cluster_name, captured_at, services, template_json
+             FROM cluster_templates WHERE id = ?1",
+        )?;
+        stmt.query_row(params![id], |row| {
+            Ok(ClusterTemplate {
+                id: row.get(0)?,
+                cluster_id: row.get(1)?,
+                label: row.get(2)?,
+                cm_cluster_name: row.get(3)?,
+                captured_at: row.get(4)?,
+                services: row.get(5)?,
+                template_json: row.get(6)?,
+            })
+        })
+        .map_err(|_| AppError::NotFound(format!("template {id}")))
+    }
+
+    pub fn delete_cluster_template(&self, id: &str) -> Result<(), AppError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM cluster_templates WHERE id = ?1", params![id])
+            .map_err(AppError::Database)?;
+        Ok(())
+    }
+
+    pub fn update_cluster_template_label(&self, id: &str, label: &str) -> Result<(), AppError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE cluster_templates SET label = ?1 WHERE id = ?2",
+            params![label, id],
+        )
+        .map_err(AppError::Database)?;
+        Ok(())
     }
 }

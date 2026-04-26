@@ -13,6 +13,7 @@ import {
   ChevronsUp,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { TemplatesPanel } from "@/components/TemplatesPanel";
 import { cn } from "@/lib/utils";
 import {
   clusterGet,
@@ -510,7 +511,7 @@ function ScalePanel({
 // Ready / detail view
 // ---------------------------------------------------------------------------
 
-type Tab = "overview" | "history" | "secrets";
+type Tab = "overview" | "history" | "secrets" | "templates";
 
 function ReadyView({
   cluster,
@@ -588,6 +589,7 @@ function ReadyView({
     { id: "overview", label: "Overview" },
     { id: "history", label: "Phase history" },
     { id: "secrets", label: "Secrets" },
+    { id: "templates", label: "Templates" },
   ];
 
   return (
@@ -759,6 +761,11 @@ function ReadyView({
         )}
         {tab === "history" && <PhaseHistoryTab cluster={cluster} />}
         {tab === "secrets" && <SecretsTab cluster={cluster} />}
+        {tab === "templates" && (
+          <div className="p-4">
+            <TemplatesPanel clusterId={cluster.id} clusterState={cluster.state} />
+          </div>
+        )}
       </div>
 
       {/* Destroy dialog */}

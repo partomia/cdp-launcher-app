@@ -138,6 +138,37 @@ export const runRemediation = (
 ): Promise<void> => call("run_remediation", { clusterId, command });
 
 // ---------------------------------------------------------------------------
+// CM Cluster Templates
+// ---------------------------------------------------------------------------
+
+export const templateCapture = (
+  clusterId: string,
+  label: string,
+): Promise<import("./types").ClusterTemplate> =>
+  call("template_capture", { clusterId, label });
+
+export const templateList = (
+  clusterId: string,
+): Promise<import("./types").ClusterTemplate[]> =>
+  call("template_list", { clusterId });
+
+export const templateDelete = (templateId: string): Promise<void> =>
+  call("template_delete", { templateId });
+
+export const templateRename = (
+  templateId: string,
+  label: string,
+): Promise<void> => call("template_rename", { templateId, label });
+
+export const templateGetJson = (templateId: string): Promise<string> =>
+  call("template_get_json", { templateId });
+
+export const templateApply = (
+  clusterId: string,
+  templateId: string,
+): Promise<void> => call("template_apply", { clusterId, templateId });
+
+// ---------------------------------------------------------------------------
 // License
 // ---------------------------------------------------------------------------
 

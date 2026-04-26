@@ -39,7 +39,12 @@ pub fn keychain_set(cluster_id: String, key: String, value: String) -> Result<()
 
 #[tauri::command]
 pub fn keychain_get(cluster_id: String, key: String) -> Result<String, AppError> {
-    let entry = make_entry(&cluster_id, &key)?;
+    keychain_get_inner(&cluster_id, &key)
+}
+
+/// Non-command version callable from other Rust modules.
+pub fn keychain_get_inner(cluster_id: &str, key: &str) -> Result<String, AppError> {
+    let entry = make_entry(cluster_id, key)?;
     entry
         .get_password()
         .map_err(|e| AppError::Keychain(e.to_string()))

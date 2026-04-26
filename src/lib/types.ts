@@ -191,6 +191,21 @@ export interface ClusterMetadata {
   [key: string]: string | undefined;
 }
 
+// ---------------------------------------------------------------------------
+// CM Cluster Templates
+// ---------------------------------------------------------------------------
+
+export interface ClusterTemplate {
+  id: string;
+  cluster_id: string;
+  label: string;
+  cm_cluster_name: string;
+  captured_at: string;
+  /** Comma-separated service types, e.g. "HDFS,YARN,HIVE,RANGER" */
+  services: string;
+  template_json: string;
+}
+
 export const PHASE_DEFS = [
   { key: "tfvars", label: "Write tfvars" },
   { key: "terraform_init", label: "Terraform Init" },
