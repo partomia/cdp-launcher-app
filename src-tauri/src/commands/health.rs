@@ -127,16 +127,26 @@ pub async fn cluster_health_fetch(
     // Open SSH tunnel: localhost:17186 → util1_ip:7183
     // (17186 avoids collision with template_capture on 17183 and open_cm_ui on 7183)
     let tunnel_port: u16 = 17186;
+
+    // Kill any stale process still holding this port from a previous fetch that
+    // didn't clean up (e.g. the app was force-quit, or SIGTERM raced with a new call).
+    kill_port(tunnel_port);
+
     let proxy_cmd = format!(
         "/usr/bin/ssh -i {key_path} -W %h:%p -q -o StrictHostKeyChecking=no ec2-user@{bastion_ip}"
     );
-    let tunnel_child = Command::new("/usr/bin/ssh")
+    let mut tunnel_child = Command::new("/usr/bin/ssh")
         .env("PATH", "/usr/bin:/bin:/usr/sbin:/opt/homebrew/bin:/usr/local/bin")
         .args([
             "-N",
-            "-o", "ExitOnForwardFailure=yes",
+            // ExitOnForwardFailure=yes causes SSH to exit if it cannot bind the local
+            // port (already in use). Remove it here — kill_port above ensures the port
+            // is free, and removing the flag prevents the tunnel dying on transient
+            // remote-side delays.
             "-o", "StrictHostKeyChecking=no",
             "-o", "UserKnownHostsFile=/dev/null",
+            "-o", "ServerAliveInterval=10",
+            "-o", "ServerAliveCountMax=6",
             "-o", &format!("ProxyCommand={proxy_cmd}"),
             "-i", &key_path,
             "-L", &format!("{tunnel_port}:{util1_ip}:7183"),
@@ -152,7 +162,9 @@ pub async fn cluster_health_fetch(
 
     let result = fetch_all(tunnel_port, &cm_password, &role_map);
 
+    // SIGTERM the tunnel and reap it so the port is freed before the next call.
     unsafe { libc::kill(tunnel_child.id() as i32, libc::SIGTERM); }
+    let _ = tunnel_child.wait();
 
     result
 }
@@ -371,6 +383,7 @@ pub async fn security_configure_external_kdc(
         .unwrap_or_else(|_| "admin".to_string());
 
     let tunnel_port: u16 = 17187;
+    kill_port(tunnel_port);
     let proxy_cmd = format!(
         "/usr/bin/ssh -i {key_path} -W %h:%p -q -o StrictHostKeyChecking=no ec2-user@{bastion_ip}"
     );
@@ -378,7 +391,6 @@ pub async fn security_configure_external_kdc(
         .env("PATH", "/usr/bin:/bin:/usr/sbin:/opt/homebrew/bin:/usr/local/bin")
         .args([
             "-N",
-            "-o", "ExitOnForwardFailure=yes",
             "-o", "StrictHostKeyChecking=no",
             "-o", "UserKnownHostsFile=/dev/null",
             "-o", &format!("ProxyCommand={proxy_cmd}"),
@@ -481,6 +493,7 @@ pub async fn security_configure_external_ldap(
     };
 
     let tunnel_port: u16 = 17188;
+    kill_port(tunnel_port);
     let proxy_cmd = format!(
         "/usr/bin/ssh -i {key_path} -W %h:%p -q -o StrictHostKeyChecking=no ec2-user@{bastion_ip}"
     );
@@ -488,7 +501,6 @@ pub async fn security_configure_external_ldap(
         .env("PATH", "/usr/bin:/bin:/usr/sbin:/opt/homebrew/bin:/usr/local/bin")
         .args([
             "-N",
-            "-o", "ExitOnForwardFailure=yes",
             "-o", "StrictHostKeyChecking=no",
             "-o", "UserKnownHostsFile=/dev/null",
             "-o", &format!("ProxyCommand={proxy_cmd}"),
@@ -906,6 +918,26 @@ fn inventory_role_map(repo_path: &str) -> HashMap<String, String> {
         }
     }
     map
+}
+
+/// Kill any process currently listening on a given TCP port on localhost.
+/// Uses `lsof -ti tcp:<port>` which is available on macOS.
+/// This is called before opening a new SSH tunnel to ensure the port is free,
+/// preventing ExitOnForwardFailure / EADDRINUSE failures on rapid re-fetch.
+fn kill_port(port: u16) {
+    let out = Command::new("/usr/sbin/lsof")
+        .args(["-ti", &format!("tcp:{port}")])
+        .output();
+    if let Ok(o) = out {
+        let pids = String::from_utf8_lossy(&o.stdout);
+        for pid_str in pids.split_whitespace() {
+            if let Ok(pid) = pid_str.trim().parse::<i32>() {
+                unsafe { libc::kill(pid, libc::SIGTERM); }
+            }
+        }
+        // Brief pause so the kernel releases the port before we bind it again.
+        std::thread::sleep(std::time::Duration::from_millis(300));
+    }
 }
 
 /// Returns util1 private IP from the [util] group in prod.ini.
