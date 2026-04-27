@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import {
   RefreshCw,
   CheckCircle2,
@@ -255,6 +256,122 @@ function ServicesGrid({ services }: { services: CmServiceSummary[] }) {
 }
 
 // ---------------------------------------------------------------------------
+// Inline log pane for security operations
+// ---------------------------------------------------------------------------
+
+interface SecurityPhaseDonePayload {
+  cluster_id: string;
+  phase: string;
+  success: boolean;
+  error: string | null;
+}
+
+interface LogLineEvent {
+  cluster_id: string;
+  phase: string;
+  line: string;
+  timestamp: string;
+}
+
+/**
+ * Compact log pane that streams live output for a single phase key.
+ * Listens for log-line events and security-phase-done to show status.
+ */
+function SecurityLogPane({
+  clusterId,
+  phase,
+  onDone,
+}: {
+  clusterId: string;
+  phase: string;
+  onDone: (success: boolean, error: string | null) => void;
+}) {
+  const [lines, setLines] = useState<string[]>([]);
+  const [status, setStatus] = useState<"running" | "success" | "failed">("running");
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let unlistenLog: (() => void) | null = null;
+    let unlistenDone: (() => void) | null = null;
+
+    listen<LogLineEvent>("log-line", (e) => {
+      if (e.payload.cluster_id !== clusterId || e.payload.phase !== phase) return;
+      setLines((prev) => {
+        const next = [...prev, e.payload.line];
+        return next.length > 500 ? next.slice(next.length - 500) : next;
+      });
+    }).then((fn) => { unlistenLog = fn; });
+
+    listen<SecurityPhaseDonePayload>("security-phase-done", (e) => {
+      if (e.payload.cluster_id !== clusterId || e.payload.phase !== phase) return;
+      const s = e.payload.success ? "success" : "failed";
+      setStatus(s);
+      setErrorMsg(e.payload.error ?? null);
+      onDone(e.payload.success, e.payload.error ?? null);
+    }).then((fn) => { unlistenDone = fn; });
+
+    return () => {
+      unlistenLog?.();
+      unlistenDone?.();
+    };
+  }, [clusterId, phase, onDone]);
+
+  // Auto-scroll to bottom
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [lines]);
+
+  const statusBar =
+    status === "running" ? (
+      <div className="flex items-center gap-1.5 text-[11px] text-blue-500">
+        <Loader2 className="h-3 w-3 animate-spin" />
+        Running…
+      </div>
+    ) : status === "success" ? (
+      <div className="flex items-center gap-1.5 text-[11px] text-green-500">
+        <CheckCircle2 className="h-3 w-3" />
+        Completed successfully
+      </div>
+    ) : (
+      <div className="flex items-center gap-1.5 text-[11px] text-red-500">
+        <XCircle className="h-3 w-3" />
+        Failed{errorMsg ? `: ${errorMsg}` : ""}
+      </div>
+    );
+
+  return (
+    <div className="rounded-lg border border-border/50 overflow-hidden">
+      <div className="flex items-center justify-between px-3 py-1.5 bg-muted/30 border-b border-border/40">
+        <span className="text-[11px] font-mono text-muted-foreground">{phase}</span>
+        {statusBar}
+      </div>
+      <div className="h-48 overflow-y-auto bg-zinc-950 dark:bg-zinc-950 p-2">
+        {lines.length === 0 && status === "running" && (
+          <p className="text-[11px] text-zinc-500 font-mono">Waiting for output…</p>
+        )}
+        {lines.map((line, i) => {
+          const isErr =
+            /error|fatal|failed|exception/i.test(line) && !/unreachable/i.test(line);
+          return (
+            <div
+              key={i}
+              className={cn(
+                "text-[11px] font-mono whitespace-pre-wrap leading-[1.4]",
+                isErr ? "text-red-400" : "text-zinc-300",
+              )}
+            >
+              {line}
+            </div>
+          );
+        })}
+        <div ref={bottomRef} />
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Security section — interactive KDC and LDAP setup cards
 // ---------------------------------------------------------------------------
 
@@ -459,61 +576,47 @@ function ExternalLdapForm({
   );
 }
 
+type SecurityPhaseKey =
+  | "security_kerberos"
+  | "security_kerberos_cluster"
+  | "security_ldap";
+
 function SecuritySection({
   health,
   clusterId,
-  onActionStart,
 }: {
   health: ClusterHealth;
   clusterId: string;
-  onActionStart?: () => void;
 }) {
   const { kerberos, ldap_enabled, ldap_url, ldap_bind_dn, auto_tls_enabled } = health;
-  const [kdcRunning, setKdcRunning] = useState(false);
-  const [kdcClusterRunning, setKdcClusterRunning] = useState(false);
-  const [ldapRunning, setLdapRunning] = useState(false);
+
+  // Track which ansible-backed phase is in progress
+  const [activePhase, setActivePhase] = useState<SecurityPhaseKey | null>(null);
   const [showExtKdc, setShowExtKdc] = useState(false);
   const [showExtLdap, setShowExtLdap] = useState(false);
-  const [kdcError, setKdcError] = useState<string | null>(null);
-  const [ldapError, setLdapError] = useState<string | null>(null);
+  const [launchError, setLaunchError] = useState<string | null>(null);
 
-  async function handleSetupKerberos() {
-    setKdcRunning(true);
-    setKdcError(null);
+  const isRunning = activePhase !== null;
+
+  async function launch(
+    phase: SecurityPhaseKey,
+    fn: () => Promise<void>,
+  ) {
+    setActivePhase(phase);
+    setLaunchError(null);
     try {
-      await securitySetupKerberos(clusterId);
-      onActionStart?.();
+      await fn();
+      // Command returns immediately — log pane takes over from here
     } catch (e: unknown) {
-      setKdcError(typeof e === "string" ? e : String((e as { message?: unknown }).message ?? e));
-    } finally {
-      setKdcRunning(false);
+      const msg = typeof e === "string" ? e : String((e as { message?: unknown }).message ?? e);
+      setLaunchError(msg);
+      setActivePhase(null);
     }
   }
 
-  async function handleKerberizeCluster() {
-    setKdcClusterRunning(true);
-    setKdcError(null);
-    try {
-      await securitySetupKerberosCluster(clusterId);
-      onActionStart?.();
-    } catch (e: unknown) {
-      setKdcError(typeof e === "string" ? e : String((e as { message?: unknown }).message ?? e));
-    } finally {
-      setKdcClusterRunning(false);
-    }
-  }
-
-  async function handleSetupLdap() {
-    setLdapRunning(true);
-    setLdapError(null);
-    try {
-      await securitySetupLdap(clusterId);
-      onActionStart?.();
-    } catch (e: unknown) {
-      setLdapError(typeof e === "string" ? e : String((e as { message?: unknown }).message ?? e));
-    } finally {
-      setLdapRunning(false);
-    }
+  function handlePhaseDone(_success: boolean, _err: string | null) {
+    // Keep the log pane visible so user can read — they can dismiss by clicking another action
+    // Leave activePhase set so log pane remains visible with final status
   }
 
   return (
@@ -540,64 +643,70 @@ function SecuritySection({
 
       {/* Kerberos card */}
       <div className="rounded-lg border border-border/50 p-4 space-y-3">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <Key className="h-4 w-4 text-muted-foreground flex-shrink-0 mt-0.5" />
-            <div>
-              <p className="text-[13px] font-medium">Kerberos</p>
-              <div className="flex items-center gap-2 mt-0.5">
-                {kerberos.kerberos_enabled ? (
-                  <HealthBadge status="STARTED" />
-                ) : kerberos.kdc_configured ? (
-                  <span className="inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium bg-yellow-100 text-yellow-700 dark:bg-yellow-950 dark:text-yellow-300">
-                    KDC configured
-                  </span>
-                ) : (
-                  <HealthBadge status="DISABLED" />
-                )}
-                {kerberos.kdc_configured && !kerberos.kerberos_enabled && (
-                  <span className="text-[10px] text-muted-foreground">cluster not yet kerberized</span>
-                )}
-              </div>
-              {(kerberos.realm || kerberos.kdc_host) && (
-                <div className="mt-1 space-y-0.5">
-                  {kerberos.realm && (
-                    <p className="font-mono text-[11px] text-muted-foreground">{kerberos.realm}</p>
-                  )}
-                  {kerberos.kdc_host && (
-                    <p className="font-mono text-[11px] text-muted-foreground">
-                      KDC: {kerberos.kdc_host}
-                      {kerberos.kdc_type && (
-                        <span className="text-muted-foreground/60"> ({kerberos.kdc_type})</span>
-                      )}
-                    </p>
-                  )}
-                </div>
+        <div className="flex items-center gap-2">
+          <Key className="h-4 w-4 text-muted-foreground flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="text-[13px] font-medium">Kerberos</p>
+            <div className="flex items-center gap-2 mt-0.5">
+              {kerberos.kerberos_enabled ? (
+                <HealthBadge status="STARTED" />
+              ) : kerberos.kdc_configured ? (
+                <span className="inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium bg-yellow-100 text-yellow-700 dark:bg-yellow-950 dark:text-yellow-300">
+                  KDC configured
+                </span>
+              ) : (
+                <HealthBadge status="DISABLED" />
+              )}
+              {kerberos.kdc_configured && !kerberos.kerberos_enabled && (
+                <span className="text-[10px] text-muted-foreground">cluster not yet kerberized</span>
               )}
             </div>
+            {(kerberos.realm || kerberos.kdc_host) && (
+              <div className="mt-1 space-y-0.5">
+                {kerberos.realm && (
+                  <p className="font-mono text-[11px] text-muted-foreground">{kerberos.realm}</p>
+                )}
+                {kerberos.kdc_host && (
+                  <p className="font-mono text-[11px] text-muted-foreground">
+                    KDC: {kerberos.kdc_host}
+                    {kerberos.kdc_type && (
+                      <span className="text-muted-foreground/60"> ({kerberos.kdc_type})</span>
+                    )}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
-        {/* FreeIPA KDC action buttons */}
         {!kerberos.kerberos_enabled && (
           <div className="flex flex-wrap items-center gap-2">
             {!kerberos.kdc_configured && (
               <ActionButton
                 label="Setup FreeIPA KDC"
-                running={kdcRunning}
-                onClick={handleSetupKerberos}
+                running={activePhase === "security_kerberos"}
+                disabled={isRunning && activePhase !== "security_kerberos"}
+                onClick={() =>
+                  launch("security_kerberos", () => securitySetupKerberos(clusterId))
+                }
               />
             )}
             {kerberos.kdc_configured && (
               <ActionButton
                 label="Kerberize Cluster"
-                running={kdcClusterRunning}
-                onClick={handleKerberizeCluster}
+                running={activePhase === "security_kerberos_cluster"}
+                disabled={isRunning && activePhase !== "security_kerberos_cluster"}
+                onClick={() =>
+                  launch("security_kerberos_cluster", () =>
+                    securitySetupKerberosCluster(clusterId),
+                  )
+                }
               />
             )}
             <button
               className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
               onClick={() => setShowExtKdc((v) => !v)}
+              disabled={isRunning}
             >
               {showExtKdc ? (
                 <ChevronDown className="h-3 w-3" />
@@ -608,37 +717,42 @@ function SecuritySection({
             </button>
           </div>
         )}
-        {kdcError && (
-          <p className="text-[11px] text-destructive font-mono">{kdcError}</p>
+
+        {launchError && activePhase === null && (
+          <p className="text-[11px] text-destructive font-mono">{launchError}</p>
         )}
-        {!kerberos.kerberos_enabled && showExtKdc && (
+
+        {/* Log pane for kerberos phases */}
+        {(activePhase === "security_kerberos" ||
+          activePhase === "security_kerberos_cluster") && (
+          <SecurityLogPane
+            clusterId={clusterId}
+            phase={activePhase}
+            onDone={handlePhaseDone}
+          />
+        )}
+
+        {!kerberos.kerberos_enabled && showExtKdc && !isRunning && (
           <ExternalKdcForm
             clusterId={clusterId}
-            onDone={() => {
-              setShowExtKdc(false);
-              onActionStart?.();
-            }}
+            onDone={() => setShowExtKdc(false)}
           />
         )}
         {kerberos.kerberos_enabled && (
           <p className="text-[11px] text-muted-foreground">
-            Cluster is kerberized. Service-level Kerberos settings can be adjusted in CM UI.
+            Cluster is kerberized. Service-level Kerberos can be adjusted in CM UI.
           </p>
         )}
       </div>
 
       {/* LDAP card */}
       <div className="rounded-lg border border-border/50 p-4 space-y-3">
-        <div className="flex items-start gap-2">
+        <div className="flex items-center gap-2">
           <Users className="h-4 w-4 text-muted-foreground flex-shrink-0 mt-0.5" />
           <div>
             <p className="text-[13px] font-medium">CM LDAP / AD Auth</p>
             <div className="flex items-center gap-2 mt-0.5">
-              {ldap_enabled ? (
-                <HealthBadge status="STARTED" />
-              ) : (
-                <HealthBadge status="DISABLED" />
-              )}
+              <HealthBadge status={ldap_enabled ? "STARTED" : "DISABLED"} />
             </div>
             {ldap_enabled && (
               <div className="mt-1 space-y-0.5">
@@ -657,12 +771,16 @@ function SecuritySection({
           <div className="flex flex-wrap items-center gap-2">
             <ActionButton
               label="Setup FreeIPA LDAP"
-              running={ldapRunning}
-              onClick={handleSetupLdap}
+              running={activePhase === "security_ldap"}
+              disabled={isRunning && activePhase !== "security_ldap"}
+              onClick={() =>
+                launch("security_ldap", () => securitySetupLdap(clusterId))
+              }
             />
             <button
               className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
               onClick={() => setShowExtLdap((v) => !v)}
+              disabled={isRunning}
             >
               {showExtLdap ? (
                 <ChevronDown className="h-3 w-3" />
@@ -673,21 +791,25 @@ function SecuritySection({
             </button>
           </div>
         )}
-        {ldapError && (
-          <p className="text-[11px] text-destructive font-mono">{ldapError}</p>
+
+        {/* Log pane for ldap phase */}
+        {activePhase === "security_ldap" && (
+          <SecurityLogPane
+            clusterId={clusterId}
+            phase="security_ldap"
+            onDone={handlePhaseDone}
+          />
         )}
-        {!ldap_enabled && showExtLdap && (
+
+        {!ldap_enabled && showExtLdap && !isRunning && (
           <ExternalLdapForm
             clusterId={clusterId}
-            onDone={() => {
-              setShowExtLdap(false);
-              onActionStart?.();
-            }}
+            onDone={() => setShowExtLdap(false)}
           />
         )}
         {ldap_enabled && (
           <p className="text-[11px] text-muted-foreground">
-            CM authenticates users via LDAP. Service-level LDAP settings (Ranger, Atlas, Knox) can be
+            CM authenticates users via LDAP. Service-level settings (Ranger, Atlas, Knox) can be
             configured in CM UI per-service.
           </p>
         )}
@@ -722,11 +844,6 @@ export function ClusterHealthPanel({ clusterId }: { clusterId: string }) {
     }
   }
 
-  // After a security action starts, prompt the user to re-fetch to see updated state.
-  function onSecurityActionStart() {
-    // The action streams output via log-line events to the log pane.
-    // We don't auto-refresh here — user clicks Refresh when ready.
-  }
 
   const goodCount = health?.hosts.filter((h) => h.health_summary === "GOOD").length ?? 0;
   const badCount = health?.hosts.filter(
@@ -801,11 +918,7 @@ export function ClusterHealthPanel({ clusterId }: { clusterId: string }) {
             <h3 className="text-[13px] font-semibold text-muted-foreground uppercase tracking-wide">
               Security
             </h3>
-            <SecuritySection
-              health={health}
-              clusterId={clusterId}
-              onActionStart={onSecurityActionStart}
-            />
+            <SecuritySection health={health} clusterId={clusterId} />
           </div>
 
           {/* Services */}

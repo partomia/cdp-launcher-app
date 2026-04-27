@@ -12,7 +12,7 @@ use std::process::Command;
 use std::sync::Arc;
 
 use serde::Serialize;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
 
 use crate::commands::keychain::keychain_get_inner;
 use crate::error::AppError;
@@ -175,30 +175,63 @@ fn make_env(repo_path: &PathBuf, aws_profile: &str, aws_region: &str) -> HashMap
 }
 
 /// Runs a make target (e.g. "kerberos", "kerberos-cluster", "cm-ldap") in the repo,
-/// streaming output as log-line events.  Returns the exit code.
+/// streaming output as log-line events. Emits "security-phase-done" when finished.
 async fn run_make_phase(
     app: AppHandle,
     store: Arc<Store>,
     runner: Arc<RunnerState>,
     cluster_id: String,
-    phase_key: &str,
-    make_target: &str,
+    phase_key: &'static str,
+    make_target: &'static str,
     cluster_repo_path: String,
     aws_profile: String,
     aws_region: String,
+) {
+    let result = run_make_phase_inner(
+        &app, &store, &runner, &cluster_id,
+        phase_key, make_target,
+        &cluster_repo_path, &aws_profile, &aws_region,
+    ).await;
+
+    let (success, error_msg) = match &result {
+        Ok(()) => (true, None),
+        Err(e) => (false, Some(e.to_string())),
+    };
+
+    let _ = app.emit(
+        "security-phase-done",
+        &serde_json::json!({
+            "cluster_id": cluster_id,
+            "phase": phase_key,
+            "success": success,
+            "error": error_msg,
+        }),
+    );
+}
+
+async fn run_make_phase_inner(
+    app: &AppHandle,
+    store: &Arc<Store>,
+    runner: &Arc<RunnerState>,
+    cluster_id: &str,
+    phase_key: &str,
+    make_target: &str,
+    cluster_repo_path: &str,
+    aws_profile: &str,
+    aws_region: &str,
 ) -> Result<(), AppError> {
-    let repo_path = PathBuf::from(&cluster_repo_path);
-    let env = make_env(&repo_path, &aws_profile, &aws_region);
+    let repo_path = PathBuf::from(cluster_repo_path);
+    let env = make_env(&repo_path, aws_profile, aws_region);
     let data_dir = app_data_dir()?;
     let log_dir = data_dir.join("logs");
 
     let started_at = chrono::Utc::now().to_rfc3339();
-    let event_id = store.start_phase_event(&cluster_id, phase_key, &started_at)?;
+    let event_id = store.start_phase_event(cluster_id, phase_key, &started_at)?;
 
     let exit_code = run_phase(
-        &app,
-        &cluster_id,
-        &runner,
+        app,
+        cluster_id,
+        runner,
         &log_dir,
         phase_key,
         repo_path,
@@ -211,12 +244,12 @@ async fn run_make_phase(
     let finished_at = chrono::Utc::now().to_rfc3339();
     if exit_code == 0 {
         store.finish_phase_event(event_id, "success", &finished_at, exit_code, None)?;
+        Ok(())
     } else {
         let summary = format!("make {make_target} exited with code {exit_code}");
         store.finish_phase_event(event_id, "failed", &finished_at, exit_code, Some(&summary))?;
-        return Err(AppError::Other(summary));
+        Err(AppError::Other(summary))
     }
-    Ok(())
 }
 
 /// Configure KDC settings in CM and import admin credentials (runs `make kerberos` / 50-kerberos.yml).
@@ -237,15 +270,9 @@ pub async fn security_setup_kerberos(
     let store_arc = Arc::clone(&*store);
     let runner_arc = Arc::clone(&*runner);
     tokio::spawn(run_make_phase(
-        app,
-        store_arc,
-        runner_arc,
-        cluster_id,
-        "security_kerberos",
-        "kerberos",
-        cluster.repo_path,
-        cluster.aws_profile,
-        cluster.aws_region,
+        app, store_arc, runner_arc, cluster_id,
+        "security_kerberos", "kerberos",
+        cluster.repo_path, cluster.aws_profile, cluster.aws_region,
     ));
     Ok(())
 }
@@ -268,15 +295,9 @@ pub async fn security_setup_kerberos_cluster(
     let store_arc = Arc::clone(&*store);
     let runner_arc = Arc::clone(&*runner);
     tokio::spawn(run_make_phase(
-        app,
-        store_arc,
-        runner_arc,
-        cluster_id,
-        "security_kerberos_cluster",
-        "kerberos-cluster",
-        cluster.repo_path,
-        cluster.aws_profile,
-        cluster.aws_region,
+        app, store_arc, runner_arc, cluster_id,
+        "security_kerberos_cluster", "kerberos-cluster",
+        cluster.repo_path, cluster.aws_profile, cluster.aws_region,
     ));
     Ok(())
 }
@@ -298,15 +319,9 @@ pub async fn security_setup_ldap(
     let store_arc = Arc::clone(&*store);
     let runner_arc = Arc::clone(&*runner);
     tokio::spawn(run_make_phase(
-        app,
-        store_arc,
-        runner_arc,
-        cluster_id,
-        "security_ldap",
-        "cm-ldap",
-        cluster.repo_path,
-        cluster.aws_profile,
-        cluster.aws_region,
+        app, store_arc, runner_arc, cluster_id,
+        "security_ldap", "cm-ldap",
+        cluster.repo_path, cluster.aws_profile, cluster.aws_region,
     ));
     Ok(())
 }
