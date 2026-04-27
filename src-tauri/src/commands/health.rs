@@ -343,6 +343,36 @@ pub async fn security_setup_ldap(
     Ok(())
 }
 
+/// Fix missing Kerberos keytabs on a cluster that is already kerberized but
+/// whose services are failing because generateCredentials never completed.
+/// Runs make kerberos-credentials (52-kerberos-credentials.yml) which:
+///   1. Installs the FreeIPA import_credentials.sh wrapper on util
+///   2. Runs importAdminCredentials
+///   3. Runs generateCredentials
+///   4. Restarts stale services via 43-cm-restart-stale.sh
+#[tauri::command]
+pub async fn security_fix_credentials(
+    app: AppHandle,
+    store: State<'_, Arc<Store>>,
+    runner: State<'_, Arc<RunnerState>>,
+    cluster_id: String,
+) -> Result<(), AppError> {
+    if runner.is_running(&cluster_id) {
+        return Err(AppError::Other(format!(
+            "operation already in progress for cluster {cluster_id}"
+        )));
+    }
+    let cluster = store.get_cluster(&cluster_id)?;
+    let store_arc = Arc::clone(&*store);
+    let runner_arc = Arc::clone(&*runner);
+    tokio::spawn(run_make_phase(
+        app, store_arc, runner_arc, cluster_id,
+        "security_fix_credentials", "kerberos-credentials",
+        cluster.repo_path, cluster.aws_profile, cluster.aws_region,
+    ));
+    Ok(())
+}
+
 /// Configure an external KDC in CM via the CM API (no ansible required).
 /// Useful when the KDC is an external MIT KDC or Active Directory, not FreeIPA.
 #[tauri::command]

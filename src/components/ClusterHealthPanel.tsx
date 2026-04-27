@@ -24,6 +24,7 @@ import {
   securitySetupKerberos,
   securitySetupKerberosCluster,
   securitySetupLdap,
+  securityFixCredentials,
   securityConfigureExternalKdc,
   securityConfigureExternalLdap,
 } from "@/lib/tauri";
@@ -591,6 +592,7 @@ function ExternalLdapForm({
 type SecurityPhaseKey =
   | "security_kerberos"
   | "security_kerberos_cluster"
+  | "security_fix_credentials"
   | "security_ldap";
 
 function SecuritySection({
@@ -748,7 +750,8 @@ function SecuritySection({
 
         {/* Log pane for kerberos phases */}
         {(logPhase === "security_kerberos" ||
-          logPhase === "security_kerberos_cluster") && (
+          logPhase === "security_kerberos_cluster" ||
+          logPhase === "security_fix_credentials") && (
           <SecurityLogPane
             clusterId={clusterId}
             phase={logPhase}
@@ -764,9 +767,22 @@ function SecuritySection({
           />
         )}
         {kerberos.kerberos_enabled && (
-          <p className="text-[11px] text-muted-foreground">
-            Cluster is kerberized. Service-level Kerberos can be adjusted in CM UI.
-          </p>
+          <div className="space-y-2">
+            <p className="text-[11px] text-muted-foreground">
+              Cluster is kerberized. Use <strong>Fix Credentials</strong> if services are
+              reporting missing keytabs or CM shows "Kerberos session initialization failed".
+            </p>
+            <ActionButton
+              label="Fix Credentials & Restart Services"
+              running={activePhase === "security_fix_credentials"}
+              disabled={isRunning && activePhase !== "security_fix_credentials"}
+              onClick={() =>
+                launch("security_fix_credentials", () =>
+                  securityFixCredentials(clusterId),
+                )
+              }
+            />
+          </div>
         )}
       </div>
 

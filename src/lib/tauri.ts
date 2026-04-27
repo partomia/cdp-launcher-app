@@ -158,6 +158,13 @@ export const securitySetupKerberosCluster = (clusterId: string): Promise<void> =
 export const securitySetupLdap = (clusterId: string): Promise<void> =>
   call("security_setup_ldap", { clusterId });
 
+/**
+ * Fix missing keytabs on an already-kerberized cluster:
+ * installs FreeIPA wrapper + importAdminCredentials + generateCredentials + restart stale services.
+ */
+export const securityFixCredentials = (clusterId: string): Promise<void> =>
+  call("security_fix_credentials", { clusterId });
+
 /** Configure an external KDC in CM via API (MIT KDC or AD). */
 export const securityConfigureExternalKdc = (
   clusterId: string,

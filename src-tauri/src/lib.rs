@@ -76,6 +76,7 @@ pub fn run() {
             health::security_setup_kerberos,
             health::security_setup_kerberos_cluster,
             health::security_setup_ldap,
+            health::security_fix_credentials,
             health::security_configure_external_kdc,
             health::security_configure_external_ldap,
             // CM cluster templates
