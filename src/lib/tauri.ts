@@ -138,6 +138,15 @@ export const runRemediation = (
 ): Promise<void> => call("run_remediation", { clusterId, command });
 
 // ---------------------------------------------------------------------------
+// Cluster health
+// ---------------------------------------------------------------------------
+
+export const clusterHealthFetch = (
+  clusterId: string,
+): Promise<import("./types").ClusterHealth> =>
+  call("cluster_health_fetch", { clusterId });
+
+// ---------------------------------------------------------------------------
 // CM Cluster Templates
 // ---------------------------------------------------------------------------
 

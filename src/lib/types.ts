@@ -206,6 +206,51 @@ export interface ClusterTemplate {
   template_json: string;
 }
 
+// ---------------------------------------------------------------------------
+// Cluster Health — CM hosts, services, security posture
+// ---------------------------------------------------------------------------
+
+export interface CmHostSummary {
+  hostname: string;
+  ip_address: string;
+  /** "GOOD" | "CONCERNING" | "BAD" | "DISABLED" | "UNKNOWN" | "NOT_AVAILABLE" */
+  health_summary: string;
+  num_cores: number | null;
+  total_phys_mem_bytes: number | null;
+  /** "Util" | "Master" | "Worker" | "Edge" | "IPA" | "Bastion" | null */
+  node_role: string | null;
+}
+
+export interface CmServiceSummary {
+  name: string;
+  service_type: string;
+  display_name: string | null;
+  /** "GOOD" | "CONCERNING" | "BAD" | "DISABLED" | "UNKNOWN" */
+  health_summary: string;
+  /** "STARTED" | "STOPPED" | "STOPPING" | "STARTING" | "UNKNOWN" | "NA" */
+  service_state: string;
+}
+
+export interface CmKerberosInfo {
+  kerberos_enabled: boolean;
+  realm: string | null;
+  kdc_host: string | null;
+  kdc_type: string | null;
+}
+
+export interface ClusterHealth {
+  cm_cluster_name: string;
+  cm_version: string | null;
+  hosts: CmHostSummary[];
+  services: CmServiceSummary[];
+  kerberos: CmKerberosInfo;
+  ldap_enabled: boolean;
+  ldap_url: string | null;
+  ldap_bind_dn: string | null;
+  auto_tls_enabled: boolean;
+  fetched_at: string;
+}
+
 export const PHASE_DEFS = [
   { key: "tfvars", label: "Write tfvars" },
   { key: "terraform_init", label: "Terraform Init" },

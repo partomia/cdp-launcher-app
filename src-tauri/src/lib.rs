@@ -6,7 +6,7 @@ mod state;
 
 use std::sync::Arc;
 
-use commands::{aws, cluster, install, keychain, license, template, ui};
+use commands::{aws, cluster, health, install, keychain, license, template, ui};
 use runner::RunnerState;
 use state::Store;
 
@@ -71,6 +71,8 @@ pub fn run() {
             ui::open_cm_tunnel,
             ui::open_ssh_terminal,
             ui::run_remediation,
+            // Cluster health
+            health::cluster_health_fetch,
             // CM cluster templates
             template::template_capture,
             template::template_list,

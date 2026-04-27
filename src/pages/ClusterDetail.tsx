@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { TemplatesPanel } from "@/components/TemplatesPanel";
+import { ClusterHealthPanel } from "@/components/ClusterHealthPanel";
 import { cn } from "@/lib/utils";
 import {
   clusterGet,
@@ -511,7 +512,7 @@ function ScalePanel({
 // Ready / detail view
 // ---------------------------------------------------------------------------
 
-type Tab = "overview" | "history" | "secrets" | "templates";
+type Tab = "overview" | "history" | "secrets" | "templates" | "health";
 
 function ReadyView({
   cluster,
@@ -587,6 +588,7 @@ function ReadyView({
 
   const tabs: { id: Tab; label: string }[] = [
     { id: "overview", label: "Overview" },
+    { id: "health", label: "Health" },
     { id: "history", label: "Phase history" },
     { id: "secrets", label: "Secrets" },
     { id: "templates", label: "Templates" },
@@ -757,6 +759,11 @@ function ReadyView({
             </div>
 
             <CostCard cluster={cluster} />
+          </div>
+        )}
+        {tab === "health" && (
+          <div className="max-w-4xl">
+            <ClusterHealthPanel clusterId={cluster.id} />
           </div>
         )}
         {tab === "history" && <PhaseHistoryTab cluster={cluster} />}
