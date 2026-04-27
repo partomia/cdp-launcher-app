@@ -146,6 +146,54 @@ export const clusterHealthFetch = (
 ): Promise<import("./types").ClusterHealth> =>
   call("cluster_health_fetch", { clusterId });
 
+/** Configure KDC settings in CM + import admin credentials (runs make kerberos). */
+export const securitySetupKerberos = (clusterId: string): Promise<void> =>
+  call("security_setup_kerberos", { clusterId });
+
+/** Kerberize the CM cluster (runs make kerberos-cluster). */
+export const securitySetupKerberosCluster = (clusterId: string): Promise<void> =>
+  call("security_setup_kerberos_cluster", { clusterId });
+
+/** Configure CM LDAP auth against FreeIPA (runs make cm-ldap). */
+export const securitySetupLdap = (clusterId: string): Promise<void> =>
+  call("security_setup_ldap", { clusterId });
+
+/** Configure an external KDC in CM via API (MIT KDC or AD). */
+export const securityConfigureExternalKdc = (
+  clusterId: string,
+  kdcHost: string,
+  realm: string,
+  kdcType: string,
+  adminPrincipal: string,
+  adminPassword: string,
+): Promise<void> =>
+  call("security_configure_external_kdc", {
+    clusterId,
+    kdcHost,
+    realm,
+    kdcType,
+    adminPrincipal,
+    adminPassword,
+  });
+
+/** Configure external LDAP/AD auth in CM via API. */
+export const securityConfigureExternalLdap = (
+  clusterId: string,
+  ldapUrl: string,
+  bindDn: string,
+  bindPassword: string,
+  searchBase: string,
+  ldapType: string,
+): Promise<void> =>
+  call("security_configure_external_ldap", {
+    clusterId,
+    ldapUrl,
+    bindDn,
+    bindPassword,
+    searchBase,
+    ldapType,
+  });
+
 // ---------------------------------------------------------------------------
 // CM Cluster Templates
 // ---------------------------------------------------------------------------

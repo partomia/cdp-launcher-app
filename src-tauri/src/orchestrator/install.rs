@@ -60,7 +60,8 @@ impl Phase {
             Self::MakeFreeipa,
             Self::MakeDatabases,
             Self::MakeCm,
-            Self::MakeKerberos,
+            // MakeKerberos removed from auto-install: KDC setup is now a post-install
+            // optional one-click action in the Health tab (security_setup_kerberos command).
         ]
     }
 }
@@ -185,9 +186,8 @@ async fn run_install_inner(ctx: InstallCtx) -> Result<(), AppError> {
     for &phase in Phase::all() {
         let phase_key = phase.key();
 
-        // Skip FreeIPA and Kerberos (FreeIPA KDC) when using an external directory (LDAP / AD).
-        let is_freeipa_only = phase == Phase::MakeFreeipa || phase == Phase::MakeKerberos;
-        if is_freeipa_only && tfvars_cfg.directory_type != "freeipa" {
+        // Skip FreeIPA when using an external directory (LDAP / AD).
+        if phase == Phase::MakeFreeipa && tfvars_cfg.directory_type != "freeipa" {
             tracing::info!(
                 "skipping phase {phase_key} — directory_type={}",
                 tfvars_cfg.directory_type
@@ -198,7 +198,7 @@ async fn run_install_inner(ctx: InstallCtx) -> Result<(), AppError> {
                     "cluster_id": ctx.cluster_id,
                     "phase": phase_key,
                     "stream": "pty",
-                    "line": format!("[skipped — directory_type={}, FreeIPA/Kerberos not required]",
+                    "line": format!("[skipped — directory_type={}, FreeIPA not required]",
                         tfvars_cfg.directory_type),
                     "timestamp": chrono::Utc::now().to_rfc3339(),
                 }),
@@ -389,8 +389,9 @@ async fn run_install_inner(ctx: InstallCtx) -> Result<(), AppError> {
                 .await?
             }
 
-            // Enables Kerberos in CM against FreeIPA (50-kerberos.yml).
-            // Skipped automatically above when directory_type != "freeipa".
+            // MakeKerberos is no longer in Phase::all() — it's a post-install optional
+            // action triggered from the Health tab. This arm is kept to satisfy the
+            // exhaustive match; it will never be reached during a normal install.
             Phase::MakeKerberos => {
                 run_phase(
                     &ctx.app, &ctx.cluster_id, &ctx.runner, &ctx.log_dir,

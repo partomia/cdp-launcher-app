@@ -73,6 +73,11 @@ pub fn run() {
             ui::run_remediation,
             // Cluster health
             health::cluster_health_fetch,
+            health::security_setup_kerberos,
+            health::security_setup_kerberos_cluster,
+            health::security_setup_ldap,
+            health::security_configure_external_kdc,
+            health::security_configure_external_ldap,
             // CM cluster templates
             template::template_capture,
             template::template_list,

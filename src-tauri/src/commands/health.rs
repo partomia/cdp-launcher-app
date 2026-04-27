@@ -12,11 +12,13 @@ use std::process::Command;
 use std::sync::Arc;
 
 use serde::Serialize;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use crate::commands::keychain::keychain_get_inner;
 use crate::error::AppError;
-use crate::state::Store;
+use crate::orchestrator::install::run_phase;
+use crate::runner::RunnerState;
+use crate::state::{app_data_dir, Store};
 
 // ---------------------------------------------------------------------------
 // Public types (serialised to the frontend)
@@ -148,6 +150,364 @@ pub async fn cluster_health_fetch(
     unsafe { libc::kill(tunnel_child.id() as i32, libc::SIGTERM); }
 
     result
+}
+
+// ---------------------------------------------------------------------------
+// Security setup commands — post-install optional one-click actions
+// ---------------------------------------------------------------------------
+
+/// Build the standard ansible/make environment for running security commands.
+fn make_env(repo_path: &PathBuf, aws_profile: &str, aws_region: &str) -> HashMap<String, String> {
+    let inherited_path = std::env::var("PATH").unwrap_or_default();
+    let tool_paths = "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin";
+    let full_path = format!("{tool_paths}:{inherited_path}");
+
+    let ansible_cfg = repo_path.join("ansible").join("ansible.cfg");
+    let ansible_inv = repo_path.join("ansible").join("inventory").join("prod.ini");
+
+    let mut env = HashMap::new();
+    env.insert("PATH".into(), full_path);
+    env.insert("AWS_PROFILE".into(), aws_profile.to_string());
+    env.insert("AWS_DEFAULT_REGION".into(), aws_region.to_string());
+    env.insert("ANSIBLE_CONFIG".into(), ansible_cfg.to_string_lossy().into_owned());
+    env.insert("ANSIBLE_INVENTORY".into(), ansible_inv.to_string_lossy().into_owned());
+    env
+}
+
+/// Runs a make target (e.g. "kerberos", "kerberos-cluster", "cm-ldap") in the repo,
+/// streaming output as log-line events.  Returns the exit code.
+async fn run_make_phase(
+    app: AppHandle,
+    store: Arc<Store>,
+    runner: Arc<RunnerState>,
+    cluster_id: String,
+    phase_key: &str,
+    make_target: &str,
+    cluster_repo_path: String,
+    aws_profile: String,
+    aws_region: String,
+) -> Result<(), AppError> {
+    let repo_path = PathBuf::from(&cluster_repo_path);
+    let env = make_env(&repo_path, &aws_profile, &aws_region);
+    let data_dir = app_data_dir()?;
+    let log_dir = data_dir.join("logs");
+
+    let started_at = chrono::Utc::now().to_rfc3339();
+    let event_id = store.start_phase_event(&cluster_id, phase_key, &started_at)?;
+
+    let exit_code = run_phase(
+        &app,
+        &cluster_id,
+        &runner,
+        &log_dir,
+        phase_key,
+        repo_path,
+        "make",
+        &[make_target],
+        env,
+    )
+    .await?;
+
+    let finished_at = chrono::Utc::now().to_rfc3339();
+    if exit_code == 0 {
+        store.finish_phase_event(event_id, "success", &finished_at, exit_code, None)?;
+    } else {
+        let summary = format!("make {make_target} exited with code {exit_code}");
+        store.finish_phase_event(event_id, "failed", &finished_at, exit_code, Some(&summary))?;
+        return Err(AppError::Other(summary));
+    }
+    Ok(())
+}
+
+/// Configure KDC settings in CM and import admin credentials (runs `make kerberos` / 50-kerberos.yml).
+/// Post-install optional step — does NOT kerberize the cluster yet.
+#[tauri::command]
+pub async fn security_setup_kerberos(
+    app: AppHandle,
+    store: State<'_, Arc<Store>>,
+    runner: State<'_, Arc<RunnerState>>,
+    cluster_id: String,
+) -> Result<(), AppError> {
+    if runner.is_running(&cluster_id) {
+        return Err(AppError::Other(format!(
+            "operation already in progress for cluster {cluster_id}"
+        )));
+    }
+    let cluster = store.get_cluster(&cluster_id)?;
+    let store_arc = Arc::clone(&*store);
+    let runner_arc = Arc::clone(&*runner);
+    tokio::spawn(run_make_phase(
+        app,
+        store_arc,
+        runner_arc,
+        cluster_id,
+        "security_kerberos",
+        "kerberos",
+        cluster.repo_path,
+        cluster.aws_profile,
+        cluster.aws_region,
+    ));
+    Ok(())
+}
+
+/// Kerberize the CM cluster (runs `make kerberos-cluster` / 55-cluster-kerberos.yml).
+/// Requires KDC already configured via security_setup_kerberos.
+#[tauri::command]
+pub async fn security_setup_kerberos_cluster(
+    app: AppHandle,
+    store: State<'_, Arc<Store>>,
+    runner: State<'_, Arc<RunnerState>>,
+    cluster_id: String,
+) -> Result<(), AppError> {
+    if runner.is_running(&cluster_id) {
+        return Err(AppError::Other(format!(
+            "operation already in progress for cluster {cluster_id}"
+        )));
+    }
+    let cluster = store.get_cluster(&cluster_id)?;
+    let store_arc = Arc::clone(&*store);
+    let runner_arc = Arc::clone(&*runner);
+    tokio::spawn(run_make_phase(
+        app,
+        store_arc,
+        runner_arc,
+        cluster_id,
+        "security_kerberos_cluster",
+        "kerberos-cluster",
+        cluster.repo_path,
+        cluster.aws_profile,
+        cluster.aws_region,
+    ));
+    Ok(())
+}
+
+/// Configure CM external LDAP auth against FreeIPA (runs `make cm-ldap` / 51-cm-ldap.yml).
+#[tauri::command]
+pub async fn security_setup_ldap(
+    app: AppHandle,
+    store: State<'_, Arc<Store>>,
+    runner: State<'_, Arc<RunnerState>>,
+    cluster_id: String,
+) -> Result<(), AppError> {
+    if runner.is_running(&cluster_id) {
+        return Err(AppError::Other(format!(
+            "operation already in progress for cluster {cluster_id}"
+        )));
+    }
+    let cluster = store.get_cluster(&cluster_id)?;
+    let store_arc = Arc::clone(&*store);
+    let runner_arc = Arc::clone(&*runner);
+    tokio::spawn(run_make_phase(
+        app,
+        store_arc,
+        runner_arc,
+        cluster_id,
+        "security_ldap",
+        "cm-ldap",
+        cluster.repo_path,
+        cluster.aws_profile,
+        cluster.aws_region,
+    ));
+    Ok(())
+}
+
+/// Configure an external KDC in CM via the CM API (no ansible required).
+/// Useful when the KDC is an external MIT KDC or Active Directory, not FreeIPA.
+#[tauri::command]
+pub async fn security_configure_external_kdc(
+    store: State<'_, Arc<Store>>,
+    cluster_id: String,
+    kdc_host: String,
+    realm: String,
+    kdc_type: String,        // "MIT KDC" | "Active Directory"
+    admin_principal: String, // e.g. "admin/admin@REALM" or "Administrator@REALM"
+    admin_password: String,
+) -> Result<(), AppError> {
+    let cluster = store.get_cluster(&cluster_id)?;
+    let key_name = cluster
+        .tfvars_json
+        .as_deref()
+        .and_then(|j| serde_json::from_str::<serde_json::Value>(j).ok())
+        .and_then(|v| v["ssh_key_name"].as_str().map(|s| s.to_string()))
+        .unwrap_or_else(|| "cdp732".to_string());
+    let bastion_ip = cluster
+        .metadata_json
+        .as_deref()
+        .and_then(|j| serde_json::from_str::<serde_json::Value>(j).ok())
+        .and_then(|v| {
+            for key in &["bastion_public_ip", "bastion_ip", "bastion_host"] {
+                if let Some(ip) = v[key].as_str() {
+                    return Some(ip.to_string());
+                }
+            }
+            None
+        })
+        .ok_or_else(|| AppError::Other("Bastion IP not found in cluster metadata".into()))?;
+    let util1_ip = util1_private_ip(&cluster.repo_path)
+        .ok_or_else(|| AppError::Other("util1 IP not found in inventory".into()))?;
+    let home = dirs::home_dir().unwrap_or_default();
+    let key_path = format!("{}/.ssh/{}.pem", home.display(), key_name);
+    let cm_password = keychain_get_inner(&cluster_id, "CM_ADMIN_PASSWORD")
+        .unwrap_or_else(|_| "admin".to_string());
+
+    let tunnel_port: u16 = 17187;
+    let proxy_cmd = format!(
+        "/usr/bin/ssh -i {key_path} -W %h:%p -q -o StrictHostKeyChecking=no ec2-user@{bastion_ip}"
+    );
+    let mut tunnel_child = Command::new("/usr/bin/ssh")
+        .env("PATH", "/usr/bin:/bin:/usr/sbin:/opt/homebrew/bin:/usr/local/bin")
+        .args([
+            "-N",
+            "-o", "ExitOnForwardFailure=yes",
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "UserKnownHostsFile=/dev/null",
+            "-o", &format!("ProxyCommand={proxy_cmd}"),
+            "-i", &key_path,
+            "-L", &format!("{tunnel_port}:{util1_ip}:7183"),
+            &format!("ec2-user@{util1_ip}"),
+        ])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(AppError::Io)?;
+
+    tokio::time::sleep(tokio::time::Duration::from_secs(6)).await;
+
+    let body = serde_json::json!({
+        "items": [
+            {"name": "KDC_TYPE",      "value": kdc_type},
+            {"name": "KDC_HOST",      "value": kdc_host},
+            {"name": "SECURITY_REALM","value": realm},
+        ]
+    })
+    .to_string();
+
+    let result = cm_api_put(tunnel_port, "admin", &cm_password, "/cm/config", &body)
+        .and_then(|_| {
+            // Import KDC admin credentials
+            let cred_body = serde_json::json!({
+                "principal": admin_principal,
+                "password": admin_password,
+            })
+            .to_string();
+            cm_api_post(
+                tunnel_port,
+                "admin",
+                &cm_password,
+                "/cm/commands/importAdminCredentials",
+                &format!("?username={}&password={}", urlencoding::encode(&admin_principal), urlencoding::encode(&admin_password)),
+                &cred_body,
+            )
+        });
+
+    unsafe { libc::kill(tunnel_child.id() as i32, libc::SIGTERM); }
+    let _ = tunnel_child.wait();
+
+    result.map(|_| ())
+}
+
+/// Configure CM external LDAP authentication via the CM API directly.
+/// Use this for external AD or LDAP servers that are not FreeIPA.
+#[tauri::command]
+pub async fn security_configure_external_ldap(
+    store: State<'_, Arc<Store>>,
+    cluster_id: String,
+    ldap_url: String,        // e.g. "ldaps://ldap.example.com:636"
+    bind_dn: String,         // e.g. "cn=cm-bind,dc=example,dc=com"
+    bind_password: String,
+    search_base: String,     // e.g. "dc=example,dc=com"
+    ldap_type: String,       // "LDAP" | "AD"
+) -> Result<(), AppError> {
+    let cluster = store.get_cluster(&cluster_id)?;
+    let key_name = cluster
+        .tfvars_json
+        .as_deref()
+        .and_then(|j| serde_json::from_str::<serde_json::Value>(j).ok())
+        .and_then(|v| v["ssh_key_name"].as_str().map(|s| s.to_string()))
+        .unwrap_or_else(|| "cdp732".to_string());
+    let bastion_ip = cluster
+        .metadata_json
+        .as_deref()
+        .and_then(|j| serde_json::from_str::<serde_json::Value>(j).ok())
+        .and_then(|v| {
+            for key in &["bastion_public_ip", "bastion_ip", "bastion_host"] {
+                if let Some(ip) = v[key].as_str() {
+                    return Some(ip.to_string());
+                }
+            }
+            None
+        })
+        .ok_or_else(|| AppError::Other("Bastion IP not found in cluster metadata".into()))?;
+    let util1_ip = util1_private_ip(&cluster.repo_path)
+        .ok_or_else(|| AppError::Other("util1 IP not found in inventory".into()))?;
+    let home = dirs::home_dir().unwrap_or_default();
+    let key_path = format!("{}/.ssh/{}.pem", home.display(), key_name);
+    let cm_password = keychain_get_inner(&cluster_id, "CM_ADMIN_PASSWORD")
+        .unwrap_or_else(|_| "admin".to_string());
+
+    let (user_filter, group_filter, username_attr) = if ldap_type == "AD" {
+        (
+            "(&(sAMAccountName={0})(objectClass=user))".to_string(),
+            "(&(member={0})(objectClass=group))".to_string(),
+            "sAMAccountName".to_string(),
+        )
+    } else {
+        (
+            "(&(uid={0})(objectClass=person))".to_string(),
+            "(&(member={0})(objectClass=posixgroup)(!(cn=admins)))".to_string(),
+            "uid".to_string(),
+        )
+    };
+
+    let tunnel_port: u16 = 17188;
+    let proxy_cmd = format!(
+        "/usr/bin/ssh -i {key_path} -W %h:%p -q -o StrictHostKeyChecking=no ec2-user@{bastion_ip}"
+    );
+    let mut tunnel_child = Command::new("/usr/bin/ssh")
+        .env("PATH", "/usr/bin:/bin:/usr/sbin:/opt/homebrew/bin:/usr/local/bin")
+        .args([
+            "-N",
+            "-o", "ExitOnForwardFailure=yes",
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "UserKnownHostsFile=/dev/null",
+            "-o", &format!("ProxyCommand={proxy_cmd}"),
+            "-i", &key_path,
+            "-L", &format!("{tunnel_port}:{util1_ip}:7183"),
+            &format!("ec2-user@{util1_ip}"),
+        ])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(AppError::Io)?;
+
+    tokio::time::sleep(tokio::time::Duration::from_secs(6)).await;
+
+    let body = serde_json::json!({
+        "items": [
+            {"name": "AUTH_BACKEND_ORDER",        "value": "db,ldap"},
+            {"name": "LDAP_URL",                  "value": ldap_url},
+            {"name": "LDAP_BIND_DN",              "value": bind_dn},
+            {"name": "LDAP_BIND_PASSWORD",        "value": bind_password},
+            {"name": "LDAP_USER_SEARCH_BASE",     "value": search_base.clone()},
+            {"name": "LDAP_USER_SEARCH_FILTER",   "value": user_filter},
+            {"name": "LDAP_GROUP_SEARCH_BASE",    "value": search_base},
+            {"name": "LDAP_GROUP_SEARCH_FILTER",  "value": group_filter},
+            {"name": "LDAP_ATTR_USERNAME_MAPPING","value": username_attr},
+            {"name": "LDAP_GROUP_SEARCH_ATTR",    "value": "cn"},
+            {"name": "LDAP_DN_PATTERN",           "value": ""},
+            {"name": "LDAP_TYPE",                 "value": ldap_type},
+        ]
+    })
+    .to_string();
+
+    let result = cm_api_put(tunnel_port, "admin", &cm_password, "/cm/config", &body);
+
+    unsafe { libc::kill(tunnel_child.id() as i32, libc::SIGTERM); }
+    let _ = tunnel_child.wait();
+
+    result.map(|_| ())
 }
 
 // ---------------------------------------------------------------------------
@@ -383,6 +743,91 @@ fn curl_cm(
     serde_json::from_str(&stdout).map_err(|e| {
         AppError::Other(format!(
             "Cannot parse CM response for {path}: {} — first 300 chars: {}",
+            e,
+            &stdout[..stdout.len().min(300)]
+        ))
+    })
+}
+
+/// PUT to the CM API with a JSON body; returns the parsed response.
+fn cm_api_put(
+    port: u16,
+    cm_user: &str,
+    cm_pass: &str,
+    path: &str,
+    body: &str,
+) -> Result<serde_json::Value, AppError> {
+    let url = format!("https://localhost:{port}/api/v54{path}");
+    let out = Command::new("/usr/bin/curl")
+        .env("PATH", "/usr/bin:/bin:/usr/sbin:/opt/homebrew/bin:/usr/local/bin")
+        .args([
+            "-sk",
+            "-X", "PUT",
+            "-u", &format!("{cm_user}:{cm_pass}"),
+            "-H", "Content-Type: application/json",
+            "-H", "Accept: application/json",
+            "--connect-timeout", "15",
+            "--max-time", "30",
+            "-d", body,
+            &url,
+        ])
+        .output()
+        .map_err(AppError::Io)?;
+
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    if stdout.is_empty() {
+        let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+        return Err(AppError::Other(format!(
+            "CM API PUT {path} returned empty response (exit={}, stderr={:?})",
+            out.status, stderr
+        )));
+    }
+    serde_json::from_str(&stdout).map_err(|e| {
+        AppError::Other(format!(
+            "Cannot parse CM PUT response for {path}: {} — first 300 chars: {}",
+            e,
+            &stdout[..stdout.len().min(300)]
+        ))
+    })
+}
+
+/// POST to the CM API with optional query string; returns the parsed response.
+fn cm_api_post(
+    port: u16,
+    cm_user: &str,
+    cm_pass: &str,
+    path: &str,
+    query: &str,
+    body: &str,
+) -> Result<serde_json::Value, AppError> {
+    let url = format!("https://localhost:{port}/api/v54{path}{query}");
+    let out = Command::new("/usr/bin/curl")
+        .env("PATH", "/usr/bin:/bin:/usr/sbin:/opt/homebrew/bin:/usr/local/bin")
+        .args([
+            "-sk",
+            "-X", "POST",
+            "-u", &format!("{cm_user}:{cm_pass}"),
+            "-H", "Content-Type: application/json",
+            "-H", "Accept: application/json",
+            "--connect-timeout", "15",
+            "--max-time", "30",
+            "-d", body,
+            &url,
+        ])
+        .output()
+        .map_err(AppError::Io)?;
+
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    if stdout.is_empty() {
+        let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+        return Err(AppError::Other(format!(
+            "CM API POST {path} returned empty response (exit={}, stderr={:?})",
+            out.status, stderr
+        )));
+    }
+    serde_json::from_str(&stdout).map_err(|e| {
+        AppError::Other(format!(
+            "Cannot parse CM POST response for {path}: {} — first 300 chars: {}",
             e,
             &stdout[..stdout.len().min(300)]
         ))
