@@ -68,8 +68,6 @@ pub async fn template_capture(
 
     let home = dirs::home_dir().unwrap_or_default();
     let key_path = format!("{}/.ssh/{}.pem", home.display(), key_name);
-    let util1_fqdn = format!("util1.{domain}");
-
     // Read CM admin password from keychain
     let cm_password = crate::commands::keychain::keychain_get_inner(
         &cluster_id,
@@ -77,58 +75,107 @@ pub async fn template_capture(
     )
     .unwrap_or_else(|_| "admin".to_string());
 
-    // Determine CM cluster name (environment from tfvars, defaults to "prod")
-    let cm_cluster_name = cluster
-        .tfvars_json
-        .as_deref()
-        .and_then(|j| serde_json::from_str::<serde_json::Value>(j).ok())
-        .and_then(|v| v["environment"].as_str().map(|s| s.to_string()))
-        .unwrap_or_else(|| "prod".to_string());
-
-    // Set up SSH tunnel local:17183 → util1:7183 (use 17183 to avoid conflict
+    // Set up SSH tunnel local:17183 → util1_ip:7183 (use 17183 to avoid conflict
     // with any existing open_cm_ui tunnel on 7183)
     let proxy_cmd = format!(
-        "ssh -i {key_path} -W %h:%p -q -o StrictHostKeyChecking=no ec2-user@{bastion_ip}"
+        "/usr/bin/ssh -i {key_path} -W %h:%p -q -o StrictHostKeyChecking=no ec2-user@{bastion_ip}"
     );
-    let mut tunnel = std::process::Command::new("ssh")
+    let mut tunnel = std::process::Command::new("/usr/bin/ssh")
+        .env("PATH", "/usr/bin:/bin:/usr/sbin:/opt/homebrew/bin:/usr/local/bin")
         .args([
             "-N",
             "-o", "ExitOnForwardFailure=yes",
             "-o", "StrictHostKeyChecking=no",
+            "-o", "UserKnownHostsFile=/dev/null",
             "-o", &format!("ProxyCommand={proxy_cmd}"),
             "-i", &key_path,
             "-L", &format!("17183:{util1_ip}:7183"),
             &format!("ec2-user@{util1_ip}"),
         ])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .spawn()
         .map_err(AppError::Io)?;
 
     // Wait for tunnel to establish
-    tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+    tokio::time::sleep(tokio::time::Duration::from_secs(6)).await;
 
-    // Call CM API to export the cluster template
-    let url = format!(
-        "https://{util1_fqdn}:17183/api/v54/clusters/{cm_cluster_name}/export"
-    );
-    // We use the system curl via Command rather than reqwest to avoid adding
-    // TLS deps; curl -k skips cert verification (internal CA).
-    let output = std::process::Command::new("curl")
+    // Step 1: discover the actual CM cluster name via GET /api/v54/clusters
+    // (do NOT guess from tfvars — the CM cluster name is set during cluster creation)
+    let clusters_url = "https://localhost:17183/api/v54/clusters".to_string();
+    let clusters_out = std::process::Command::new("/usr/bin/curl")
+        .env("PATH", "/usr/bin:/bin:/usr/sbin:/opt/homebrew/bin:/usr/local/bin")
         .args([
             "-sk",
             "-u", &format!("admin:{cm_password}"),
             "-H", "Accept: application/json",
-            &url,
+            "--connect-timeout", "15",
+            "--max-time", "30",
+            &clusters_url,
+        ])
+        .output()
+        .map_err(AppError::Io)?;
+
+    let clusters_stdout = String::from_utf8_lossy(&clusters_out.stdout).to_string();
+    let clusters_stderr = String::from_utf8_lossy(&clusters_out.stderr).to_string();
+
+    if clusters_stdout.is_empty() {
+        let _ = tunnel.kill();
+        return Err(AppError::Other(format!(
+            "Cannot reach CM at localhost:17183 — tunnel may not have established. \
+             exit={} stderr={:?}",
+            clusters_out.status, clusters_stderr
+        )));
+    }
+
+    let cm_cluster_name = {
+        let v: serde_json::Value = serde_json::from_str(&clusters_stdout).map_err(|e| {
+            AppError::Other(format!(
+                "Cannot parse /clusters response: {} — raw: {}",
+                e,
+                &clusters_stdout[..clusters_stdout.len().min(400)]
+            ))
+        })?;
+        v["items"][0]["name"]
+            .as_str()
+            .ok_or_else(|| {
+                AppError::Other(format!(
+                    "No clusters in CM response: {}",
+                    &clusters_stdout[..clusters_stdout.len().min(400)]
+                ))
+            })?
+            .to_string()
+    };
+
+    tracing::info!("template_capture: discovered CM cluster name = '{}'", cm_cluster_name);
+
+    // Step 2: export the cluster template — curl hits localhost:17183 (the tunnel endpoint)
+    let export_url = format!(
+        "https://localhost:17183/api/v54/clusters/{}/export",
+        urlencoding::encode(&cm_cluster_name)
+    );
+    let output = std::process::Command::new("/usr/bin/curl")
+        .env("PATH", "/usr/bin:/bin:/usr/sbin:/opt/homebrew/bin:/usr/local/bin")
+        .args([
+            "-sk",
+            "-u", &format!("admin:{cm_password}"),
+            "-H", "Accept: application/json",
+            "--connect-timeout", "15",
+            "--max-time", "60",
+            &export_url,
         ])
         .output()
         .map_err(AppError::Io)?;
 
     let _ = tunnel.kill();
 
+    let export_stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
     if !output.status.success() && output.stdout.is_empty() {
         return Err(AppError::Other(format!(
-            "curl failed ({}): {}",
-            output.status,
-            String::from_utf8_lossy(&output.stderr)
+            "curl export failed (exit={}): stderr={:?}",
+            output.status, export_stderr
         )));
     }
 
