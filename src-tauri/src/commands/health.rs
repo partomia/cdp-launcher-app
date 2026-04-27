@@ -508,17 +508,15 @@ pub async fn security_configure_external_ldap(
     let cm_password = keychain_get_inner(&cluster_id, "CM_ADMIN_PASSWORD")
         .unwrap_or_else(|_| "admin".to_string());
 
-    let (user_filter, group_filter, username_attr) = if ldap_type == "AD" {
+    let (user_filter, group_filter) = if ldap_type == "AD" {
         (
             "(&(sAMAccountName={0})(objectClass=user))".to_string(),
             "(&(member={0})(objectClass=group))".to_string(),
-            "sAMAccountName".to_string(),
         )
     } else {
         (
             "(&(uid={0})(objectClass=person))".to_string(),
             "(&(member={0})(objectClass=posixgroup)(!(cn=admins)))".to_string(),
-            "uid".to_string(),
         )
     };
 
@@ -548,18 +546,16 @@ pub async fn security_configure_external_ldap(
 
     let body = serde_json::json!({
         "items": [
-            {"name": "AUTH_BACKEND_ORDER",        "value": "db,ldap"},
-            {"name": "LDAP_URL",                  "value": ldap_url},
-            {"name": "LDAP_BIND_DN",              "value": bind_dn},
-            {"name": "LDAP_BIND_PASSWORD",        "value": bind_password},
-            {"name": "LDAP_USER_SEARCH_BASE",     "value": search_base.clone()},
-            {"name": "LDAP_USER_SEARCH_FILTER",   "value": user_filter},
-            {"name": "LDAP_GROUP_SEARCH_BASE",    "value": search_base},
-            {"name": "LDAP_GROUP_SEARCH_FILTER",  "value": group_filter},
-            {"name": "LDAP_ATTR_USERNAME_MAPPING","value": username_attr},
-            {"name": "LDAP_GROUP_SEARCH_ATTR",    "value": "cn"},
-            {"name": "LDAP_DN_PATTERN",           "value": ""},
-            {"name": "LDAP_TYPE",                 "value": ldap_type},
+            {"name": "AUTH_BACKEND_ORDER",       "value": "db,ldap"},
+            {"name": "LDAP_URL",                 "value": ldap_url},
+            {"name": "LDAP_BIND_DN",             "value": bind_dn},
+            {"name": "LDAP_BIND_PASSWORD",       "value": bind_password},
+            {"name": "LDAP_USER_SEARCH_BASE",    "value": search_base.clone()},
+            {"name": "LDAP_USER_SEARCH_FILTER",  "value": user_filter},
+            {"name": "LDAP_GROUP_SEARCH_BASE",   "value": search_base},
+            {"name": "LDAP_GROUP_SEARCH_FILTER", "value": group_filter},
+            {"name": "LDAP_DN_PATTERN",          "value": ""},
+            {"name": "LDAP_TYPE",                "value": ldap_type},
         ]
     })
     .to_string();
