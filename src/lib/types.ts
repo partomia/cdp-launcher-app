@@ -232,7 +232,10 @@ export interface CmServiceSummary {
 }
 
 export interface CmKerberosInfo {
+  /** true = cluster has been kerberized (make kerberos-cluster ran) */
   kerberos_enabled: boolean;
+  /** true = KDC settings configured in CM (make kerberos ran), even if cluster not yet kerberized */
+  kdc_configured: boolean;
   realm: string | null;
   kdc_host: string | null;
   kdc_type: string | null;

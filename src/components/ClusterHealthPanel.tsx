@@ -267,9 +267,24 @@ function SecuritySection({ health }: { health: ClusterHealth }) {
       {
         icon: <Key className="h-4 w-4 text-muted-foreground" />,
         label: "Kerberos",
-        value: kerberos.kerberos_enabled ? (
-          <div className="space-y-0.5">
-            <HealthBadge status="STARTED" />
+        value: (
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              {kerberos.kerberos_enabled ? (
+                <HealthBadge status="STARTED" />
+              ) : kerberos.kdc_configured ? (
+                <span className="inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium bg-yellow-100 text-yellow-700 dark:bg-yellow-950 dark:text-yellow-300">
+                  KDC configured
+                </span>
+              ) : (
+                <HealthBadge status="DISABLED" />
+              )}
+              {kerberos.kdc_configured && !kerberos.kerberos_enabled && (
+                <span className="text-[10px] text-muted-foreground">
+                  cluster not yet kerberized
+                </span>
+              )}
+            </div>
             {kerberos.realm && (
               <p className="font-mono text-[11px] text-muted-foreground">
                 {kerberos.realm}
@@ -286,13 +301,11 @@ function SecuritySection({ health }: { health: ClusterHealth }) {
               </p>
             )}
           </div>
-        ) : (
-          <HealthBadge status="DISABLED" />
         ),
       },
       {
         icon: <Users className="h-4 w-4 text-muted-foreground" />,
-        label: "LDAP / AD",
+        label: "CM LDAP auth",
         value: ldap_enabled ? (
           <div className="space-y-0.5">
             <HealthBadge status="STARTED" />
@@ -308,7 +321,12 @@ function SecuritySection({ health }: { health: ClusterHealth }) {
             )}
           </div>
         ) : (
-          <HealthBadge status="DISABLED" />
+          <div className="space-y-0.5">
+            <HealthBadge status="DISABLED" />
+            <p className="text-[10px] text-muted-foreground">
+              FreeIPA (LDAP) is available — configure via CM UI → Administration → External Authentication
+            </p>
+          </div>
         ),
       },
       {

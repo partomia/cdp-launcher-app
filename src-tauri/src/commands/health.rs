@@ -47,7 +47,10 @@ pub struct CmServiceSummary {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CmKerberosInfo {
+    /// true = cluster has been kerberized (make kerberos-cluster ran)
     pub kerberos_enabled: bool,
+    /// true = KDC settings are configured in CM (make kerberos ran) even if cluster not yet kerberized
+    pub kdc_configured: bool,
     pub realm: Option<String>,
     pub kdc_host: Option<String>,
     pub kdc_type: Option<String>,
@@ -180,21 +183,33 @@ fn fetch_all(
     let hosts_val = curl_cm(port, cm_user, cm_pass, "/hosts")?;
     let hosts = parse_hosts(&hosts_val, role_map);
 
-    // 5. Kerberos info
-    let kerberos = curl_cm(port, cm_user, cm_pass, "/cm/kerberosInfo")
-        .map(|v| parse_kerberos(&v))
-        .unwrap_or_else(|_| CmKerberosInfo {
-            kerberos_enabled: false,
-            realm: None,
-            kdc_host: None,
-            kdc_type: None,
-        });
-
-    // 6. CM config (LDAP, Auto-TLS)
-    let (ldap_enabled, ldap_url, ldap_bind_dn, auto_tls_enabled) =
+    // 5. CM config — reads KDC settings, LDAP, Auto-TLS in one call
+    // KDC_TYPE/KDC_HOST/SECURITY_REALM are written by `make kerberos` even before
+    // the cluster is kerberized, so we can show them regardless of kerberosEnabled.
+    let (ldap_enabled, ldap_url, ldap_bind_dn, auto_tls_enabled,
+         kdc_configured_from_config, realm_from_config, kdc_host_from_config, kdc_type_from_config) =
         curl_cm(port, cm_user, cm_pass, "/cm/config")
             .map(|v| parse_cm_config(&v))
-            .unwrap_or((false, None, None, true));
+            .unwrap_or((false, None, None, true, false, None, None, None));
+
+    // 6. kerberosInfo — reflects whether cluster is actually kerberized
+    let kerberos = curl_cm(port, cm_user, cm_pass, "/cm/kerberosInfo")
+        .map(|v| {
+            let mut k = parse_kerberos(&v);
+            k.kdc_configured = kdc_configured_from_config;
+            // Fill in KDC details from /cm/config if kerberosInfo doesn't have them
+            if k.realm.is_none() { k.realm = realm_from_config.clone(); }
+            if k.kdc_host.is_none() { k.kdc_host = kdc_host_from_config.clone(); }
+            if k.kdc_type.is_none() { k.kdc_type = kdc_type_from_config.clone(); }
+            k
+        })
+        .unwrap_or_else(|_| CmKerberosInfo {
+            kerberos_enabled: false,
+            kdc_configured: kdc_configured_from_config,
+            realm: realm_from_config,
+            kdc_host: kdc_host_from_config,
+            kdc_type: kdc_type_from_config,
+        });
 
     Ok(ClusterHealth {
         cm_cluster_name,
@@ -281,43 +296,56 @@ fn parse_hosts(
 fn parse_kerberos(v: &serde_json::Value) -> CmKerberosInfo {
     CmKerberosInfo {
         kerberos_enabled: v["kerberosEnabled"].as_bool().unwrap_or(false),
+        kdc_configured: false, // filled in by caller from /cm/config
         realm: v["realm"].as_str().map(|s| s.to_string()),
         kdc_host: v["kdcHost"].as_str().map(|s| s.to_string()),
         kdc_type: v["kdcType"].as_str().map(|s| s.to_string()),
     }
 }
 
-fn parse_cm_config(v: &serde_json::Value) -> (bool, Option<String>, Option<String>, bool) {
+/// Parses /cm/config items.
+/// Returns: (ldap_enabled, ldap_url, ldap_bind_dn, auto_tls, kerberos_configured, realm, kdc_host, kdc_type)
+fn parse_cm_config(
+    v: &serde_json::Value,
+) -> (bool, Option<String>, Option<String>, bool, bool, Option<String>, Option<String>, Option<String>) {
     let items = v["items"].as_array();
     let mut ldap_url: Option<String> = None;
     let mut ldap_bind_dn: Option<String> = None;
     let mut auth_order: Option<String> = None;
-    let mut auto_tls = true; // default: enabled (our installer always enables it)
+    let mut auto_tls = true;
+    // KDC config keys written by make kerberos (40-cm-kerberos-enable.sh)
+    let mut kdc_type: Option<String> = None;
+    let mut kdc_host: Option<String> = None;
+    let mut realm: Option<String> = None;
 
     if let Some(arr) = items {
         for item in arr {
             let name = item["name"].as_str().unwrap_or("");
             let value = item["value"].as_str().unwrap_or("").to_string();
+            if value.is_empty() { continue; }
             match name {
-                "LDAP_URL" => ldap_url = if value.is_empty() { None } else { Some(value) },
-                "LDAP_BIND_DN" => ldap_bind_dn = if value.is_empty() { None } else { Some(value) },
-                "AUTH_BACKEND_ORDER" => auth_order = Some(value),
+                "LDAP_URL"          => ldap_url    = Some(value),
+                "LDAP_BIND_DN"      => ldap_bind_dn = Some(value),
+                "AUTH_BACKEND_ORDER"=> auth_order  = Some(value),
                 "WEB_TLS" | "AGENT_TLS" => {
-                    // if explicitly set to false, note it
                     if value == "false" { auto_tls = false; }
                 }
+                // Kerberos KDC settings — written by make kerberos even before cluster is kerberized
+                "KDC_TYPE"          => kdc_type = Some(value),
+                "KDC_HOST"          => kdc_host = Some(value),
+                "SECURITY_REALM"    => realm    = Some(value),
                 _ => {}
             }
         }
     }
 
     let ldap_enabled = ldap_url.is_some()
-        || auth_order
-            .as_deref()
-            .map(|s| s.contains("ldap"))
-            .unwrap_or(false);
+        || auth_order.as_deref().map(|s| s.contains("ldap")).unwrap_or(false);
 
-    (ldap_enabled, ldap_url, ldap_bind_dn, auto_tls)
+    // KDC is configured if KDC_TYPE and KDC_HOST are present (set by make kerberos)
+    let kerberos_configured = kdc_type.is_some() && kdc_host.is_some();
+
+    (ldap_enabled, ldap_url, ldap_bind_dn, auto_tls, kerberos_configured, realm, kdc_host, kdc_type)
 }
 
 // ---------------------------------------------------------------------------
