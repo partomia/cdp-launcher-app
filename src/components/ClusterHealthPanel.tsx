@@ -281,10 +281,12 @@ function SecurityLogPane({
   clusterId,
   phase,
   onDone,
+  onDismiss,
 }: {
   clusterId: string;
   phase: string;
   onDone: (success: boolean, error: string | null) => void;
+  onDismiss?: () => void;
 }) {
   const [lines, setLines] = useState<string[]>([]);
   const [status, setStatus] = useState<"running" | "success" | "failed">("running");
@@ -343,8 +345,18 @@ function SecurityLogPane({
   return (
     <div className="rounded-lg border border-border/50 overflow-hidden">
       <div className="flex items-center justify-between px-3 py-1.5 bg-muted/30 border-b border-border/40">
-        <span className="text-[11px] font-mono text-muted-foreground">{phase}</span>
-        {statusBar}
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] font-mono text-muted-foreground">{phase}</span>
+          {statusBar}
+        </div>
+        {status !== "running" && onDismiss && (
+          <button
+            onClick={onDismiss}
+            className="text-[10px] text-muted-foreground hover:text-foreground transition-colors ml-2"
+          >
+            dismiss
+          </button>
+        )}
       </div>
       <div className="h-48 overflow-y-auto bg-zinc-950 dark:bg-zinc-950 p-2">
         {lines.length === 0 && status === "running" && (
@@ -590,33 +602,36 @@ function SecuritySection({
 }) {
   const { kerberos, ldap_enabled, ldap_url, ldap_bind_dn, auto_tls_enabled } = health;
 
-  // Track which ansible-backed phase is in progress
+  // activePhase: phase currently in-flight — drives button spinner + disabled state
   const [activePhase, setActivePhase] = useState<SecurityPhaseKey | null>(null);
+  // logPhase: phase whose log pane is visible (kept after completion so user can read output)
+  const [logPhase, setLogPhase] = useState<SecurityPhaseKey | null>(null);
   const [showExtKdc, setShowExtKdc] = useState(false);
   const [showExtLdap, setShowExtLdap] = useState(false);
   const [launchError, setLaunchError] = useState<string | null>(null);
 
   const isRunning = activePhase !== null;
 
-  async function launch(
-    phase: SecurityPhaseKey,
-    fn: () => Promise<void>,
-  ) {
+  async function launch(phase: SecurityPhaseKey, fn: () => Promise<void>) {
     setActivePhase(phase);
+    setLogPhase(phase);  // open log pane immediately
     setLaunchError(null);
     try {
       await fn();
-      // Command returns immediately — log pane takes over from here
+      // Tauri command returns immediately after spawning — security-phase-done event
+      // fires when the ansible job actually finishes (handled in SecurityLogPane).
     } catch (e: unknown) {
       const msg = typeof e === "string" ? e : String((e as { message?: unknown }).message ?? e);
       setLaunchError(msg);
       setActivePhase(null);
+      setLogPhase(null);
     }
   }
 
+  // Called by SecurityLogPane when security-phase-done event arrives
   function handlePhaseDone(_success: boolean, _err: string | null) {
-    // Keep the log pane visible so user can read — they can dismiss by clicking another action
-    // Leave activePhase set so log pane remains visible with final status
+    setActivePhase(null);  // stop spinner, re-enable buttons
+    // logPhase stays set — log pane remains visible with final status for the user to read
   }
 
   return (
@@ -732,12 +747,13 @@ function SecuritySection({
         )}
 
         {/* Log pane for kerberos phases */}
-        {(activePhase === "security_kerberos" ||
-          activePhase === "security_kerberos_cluster") && (
+        {(logPhase === "security_kerberos" ||
+          logPhase === "security_kerberos_cluster") && (
           <SecurityLogPane
             clusterId={clusterId}
-            phase={activePhase}
+            phase={logPhase}
             onDone={handlePhaseDone}
+            onDismiss={() => setLogPhase(null)}
           />
         )}
 
@@ -802,11 +818,12 @@ function SecuritySection({
         )}
 
         {/* Log pane for ldap phase */}
-        {activePhase === "security_ldap" && (
+        {logPhase === "security_ldap" && (
           <SecurityLogPane
             clusterId={clusterId}
             phase="security_ldap"
             onDone={handlePhaseDone}
+            onDismiss={() => setLogPhase(null)}
           />
         )}
 
