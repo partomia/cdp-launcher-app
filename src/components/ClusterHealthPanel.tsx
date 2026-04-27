@@ -650,15 +650,22 @@ function SecuritySection({
             <div className="flex items-center gap-2 mt-0.5">
               {kerberos.kerberos_enabled ? (
                 <HealthBadge status="STARTED" />
-              ) : kerberos.kdc_configured ? (
+              ) : kerberos.kerberos_cm_ready ? (
                 <span className="inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium bg-yellow-100 text-yellow-700 dark:bg-yellow-950 dark:text-yellow-300">
-                  KDC configured
+                  KDC ready
+                </span>
+              ) : kerberos.kdc_configured ? (
+                <span className="inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium bg-orange-100 text-orange-700 dark:bg-orange-950 dark:text-orange-300">
+                  KDC settings only
                 </span>
               ) : (
                 <HealthBadge status="DISABLED" />
               )}
-              {kerberos.kdc_configured && !kerberos.kerberos_enabled && (
+              {kerberos.kerberos_cm_ready && !kerberos.kerberos_enabled && (
                 <span className="text-[10px] text-muted-foreground">cluster not yet kerberized</span>
+              )}
+              {kerberos.kdc_configured && !kerberos.kerberos_cm_ready && (
+                <span className="text-[10px] text-muted-foreground">credentials not imported</span>
               )}
             </div>
             {(kerberos.realm || kerberos.kdc_host) && (
@@ -681,7 +688,8 @@ function SecuritySection({
 
         {!kerberos.kerberos_enabled && (
           <div className="flex flex-wrap items-center gap-2">
-            {!kerberos.kdc_configured && (
+            {/* Step 1: run make kerberos — configures KDC in CM + imports admin credentials */}
+            {!kerberos.kerberos_cm_ready && (
               <ActionButton
                 label="Setup FreeIPA KDC"
                 running={activePhase === "security_kerberos"}
@@ -691,7 +699,8 @@ function SecuritySection({
                 }
               />
             )}
-            {kerberos.kdc_configured && (
+            {/* Step 2: run make kerberos-cluster — only enabled after credentials are imported */}
+            {kerberos.kerberos_cm_ready && (
               <ActionButton
                 label="Kerberize Cluster"
                 running={activePhase === "security_kerberos_cluster"}

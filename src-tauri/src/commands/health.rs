@@ -49,10 +49,15 @@ pub struct CmServiceSummary {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CmKerberosInfo {
-    /// true = cluster has been kerberized (make kerberos-cluster ran)
+    /// true = cluster has been kerberized (make kerberos-cluster ran).
+    /// Read from GET /clusters/{name}/kerberosInfo → kerberized.
     pub kerberos_enabled: bool,
-    /// true = KDC settings are configured in CM (make kerberos ran) even if cluster not yet kerberized
+    /// true = KDC settings (KDC_TYPE, KDC_HOST, SECURITY_REALM) are in /cm/config.
+    /// Set by make kerberos early in its run.
     pub kdc_configured: bool,
+    /// true = admin credentials have been imported into CM (importAdminCredentials succeeded).
+    /// This is the gate for make kerberos-cluster — read from /cm/kerberosInfo → kerberized.
+    pub kerberos_cm_ready: bool,
     pub realm: Option<String>,
     pub kdc_host: Option<String>,
     pub kdc_type: Option<String>,
@@ -581,6 +586,7 @@ fn fetch_all(
         .unwrap_or_else(|_| CmKerberosInfo {
             kerberos_enabled: false,
             kdc_configured: kdc_configured_from_config,
+            kerberos_cm_ready: false,
             realm: realm_from_config,
             kdc_host: kdc_host_from_config,
             kdc_type: kdc_type_from_config,
@@ -669,9 +675,20 @@ fn parse_hosts(
 }
 
 fn parse_kerberos(v: &serde_json::Value) -> CmKerberosInfo {
+    // /cm/kerberosInfo has:
+    //   kerberosEnabled  — old field name (some CM builds)
+    //   kerberized       — true after importAdminCredentials completes (make kerberos)
+    // Both are checked so we handle different CM versions.
+    let kerberos_enabled =
+        v["kerberosEnabled"].as_bool().unwrap_or(false)
+        || v["kerberized"].as_bool().unwrap_or(false);
+    // kerberos_cm_ready: true when admin credentials have been imported into CM.
+    // The 41-cm-cluster-kerberize.sh script gates on this via /cm/kerberosInfo → .kerberized.
+    let kerberos_cm_ready = v["kerberized"].as_bool().unwrap_or(false);
     CmKerberosInfo {
-        kerberos_enabled: v["kerberosEnabled"].as_bool().unwrap_or(false),
-        kdc_configured: false, // filled in by caller from /cm/config
+        kerberos_enabled,
+        kdc_configured: false,   // filled in by caller from /cm/config
+        kerberos_cm_ready,
         realm: v["realm"].as_str().map(|s| s.to_string()),
         kdc_host: v["kdcHost"].as_str().map(|s| s.to_string()),
         kdc_type: v["kdcType"].as_str().map(|s| s.to_string()),

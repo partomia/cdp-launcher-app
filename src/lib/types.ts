@@ -234,8 +234,13 @@ export interface CmServiceSummary {
 export interface CmKerberosInfo {
   /** true = cluster has been kerberized (make kerberos-cluster ran) */
   kerberos_enabled: boolean;
-  /** true = KDC settings configured in CM (make kerberos ran), even if cluster not yet kerberized */
+  /** true = KDC settings (KDC_TYPE, KDC_HOST, SECURITY_REALM) present in /cm/config */
   kdc_configured: boolean;
+  /**
+   * true = admin credentials imported into CM (importAdminCredentials succeeded).
+   * Gate for make kerberos-cluster — read from /cm/kerberosInfo → .kerberized.
+   */
+  kerberos_cm_ready: boolean;
   realm: string | null;
   kdc_host: string | null;
   kdc_type: string | null;
