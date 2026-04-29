@@ -212,6 +212,18 @@ impl Store {
         Ok(())
     }
 
+    pub fn update_cluster_repo_path(&self, id: &str, repo_path: &str) -> Result<(), AppError> {
+        let conn = self.conn.lock().unwrap();
+        let n = conn.execute(
+            "UPDATE clusters SET repo_path = ?1 WHERE id = ?2",
+            params![repo_path, id],
+        )?;
+        if n == 0 {
+            return Err(AppError::NotFound(format!("cluster {id}")));
+        }
+        Ok(())
+    }
+
     pub fn delete_cluster(&self, id: &str) -> Result<(), AppError> {
         let conn = self.conn.lock().unwrap();
         conn.execute("DELETE FROM clusters WHERE id = ?1", params![id])?;

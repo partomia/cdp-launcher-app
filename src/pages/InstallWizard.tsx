@@ -8,7 +8,9 @@ import {
   awsDetectPublicIp,
   keychainSet,
   clusterCreate,
+  clusterValidateRepoPath,
   installStart,
+  settingsGet,
 } from "@/lib/tauri";
 import { DEFAULT_TFVARS } from "@/lib/types";
 
@@ -736,8 +738,19 @@ export default function InstallWizard() {
   const [launchError, setLaunchError] = useState<string | null>(null);
 
   useEffect(() => {
-    awsProfileList()
-      .then(setProfiles)
+    awsProfileList().then(setProfiles).catch(() => {});
+    settingsGet()
+      .then((settings) => {
+        setForm((f) => ({
+          ...f,
+          repoPath: f.repoPath || settings.default_repo_path || "",
+          awsProfile: f.awsProfile || settings.default_aws_profile || "",
+          awsRegion:
+            f.awsRegion === INITIAL.awsRegion
+              ? settings.default_aws_region || f.awsRegion
+              : f.awsRegion,
+        }));
+      })
       .catch(() => {});
   }, []);
 
@@ -775,6 +788,13 @@ export default function InstallWizard() {
     setLaunching(true);
 
     try {
+      const repoCheck = await clusterValidateRepoPath(form.repoPath.trim());
+      if (!repoCheck.ok) {
+        setLaunchError(repoCheck.message);
+        setLaunching(false);
+        return;
+      }
+
       // Build tfvars config
       const tfvars = {
         ...DEFAULT_TFVARS,

@@ -4,12 +4,14 @@ import { cn } from "@/lib/utils";
 import {
   settingsGet,
   settingsSet,
+  repoSyncStatus,
+  repoSyncNow,
   forgetAllSecrets,
   deleteAllClusters,
   licenseInfo,
   licenseActivate,
 } from "@/lib/tauri";
-import type { LicenseInfo } from "@/lib/tauri";
+import type { LicenseInfo, RepoSyncStatus } from "@/lib/tauri";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -75,6 +77,8 @@ export default function Settings() {
   const [dangerBusy, setDangerBusy] = useState(false);
   const [dangerMsg, setDangerMsg] = useState<string | null>(null);
   const [dataDir, setDataDir] = useState("");
+  const [repoSync, setRepoSync] = useState<RepoSyncStatus | null>(null);
+  const [repoSyncBusy, setRepoSyncBusy] = useState(false);
 
   // License state
   const [license, setLicense] = useState<LicenseInfo | null>(null);
@@ -86,6 +90,7 @@ export default function Settings() {
     settingsGet()
       .then(setSettings)
       .catch(() => {});
+    repoSyncStatus().then(setRepoSync).catch(() => {});
     // Data directory is stable based on macOS convention
     setDataDir(`~/Library/Application Support/com.partomia.cdp-launcher`);
     licenseInfo().then(setLicense).catch(() => {});
@@ -120,8 +125,23 @@ export default function Settings() {
     for (const [key, value] of Object.entries(settings)) {
       await settingsSet(key, value);
     }
+    try {
+      setRepoSync(await repoSyncStatus());
+    } catch {
+      /* ignore */
+    }
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
+  }
+
+  async function syncRepoNow() {
+    setRepoSyncBusy(true);
+    try {
+      setRepoSync(await repoSyncNow());
+      setSettings(await settingsGet());
+    } finally {
+      setRepoSyncBusy(false);
+    }
   }
 
   async function runDangerAction() {
@@ -191,6 +211,87 @@ export default function Settings() {
             </span>
           )}
         </div>
+      </section>
+
+      <section className="space-y-4">
+        <h2 className="text-[14px] font-semibold">Managed installer repo</h2>
+        <Field
+          label="Sync on app startup"
+          hint="If enabled, the app will clone or fast-forward the installer repo on launch. If sync fails, the app keeps using the last local checkout."
+        >
+          <label className="flex items-center gap-2 text-[13px]">
+            <input
+              type="checkbox"
+              checked={settings.managed_repo_sync_enabled === "true"}
+              onChange={(e) =>
+                set("managed_repo_sync_enabled", e.target.checked ? "true" : "false")
+              }
+            />
+            Enable managed repo sync
+          </label>
+        </Field>
+        <Field
+          label="Git repo URL"
+          hint="Remote repo the app should clone/pull for installer content."
+        >
+          <TextInput
+            value={settings.managed_repo_url ?? ""}
+            onChange={(v) => set("managed_repo_url", v)}
+            placeholder="https://github.com/partomia/CDP7.3.2-PVC-Base-Installation.git"
+          />
+        </Field>
+        <Field label="Branch">
+          <TextInput
+            value={settings.managed_repo_branch ?? "main"}
+            onChange={(v) => set("managed_repo_branch", v)}
+            placeholder="main"
+          />
+        </Field>
+        <Field
+          label="Local checkout path"
+          hint="The app syncs the repo into this folder and also uses it as the default installer repo path."
+        >
+          <TextInput
+            value={settings.managed_repo_local_path ?? ""}
+            onChange={(v) => set("managed_repo_local_path", v)}
+            placeholder="/Users/you/Library/Application Support/com.partomia.cdp-launcher/repos/cdp-732-automation"
+          />
+        </Field>
+        <div className="flex items-center gap-3">
+          <Button size="sm" variant="outline" onClick={syncRepoNow} disabled={repoSyncBusy}>
+            {repoSyncBusy ? "Syncing…" : "Sync now"}
+          </Button>
+          {repoSync && (
+            <span
+              className={cn(
+                "text-[12px]",
+                repoSync.last_status === "ok"
+                  ? "text-green-600 dark:text-green-400"
+                  : repoSync.last_status === "error"
+                    ? "text-destructive"
+                    : "text-muted-foreground",
+              )}
+            >
+              {repoSync.last_status || "No sync yet"}
+            </span>
+          )}
+        </div>
+        {repoSync && (
+          <div className="rounded-lg border border-border/50 divide-y divide-border/50 text-[13px]">
+            {[
+              ["Status", repoSync.last_status || "not run"],
+              ["Last sync", repoSync.last_synced_at || "—"],
+              ["Local path", repoSync.local_path || "—"],
+              ["HEAD", repoSync.head || "—"],
+              ["Message", repoSync.last_message || "—"],
+            ].map(([label, value]) => (
+              <div key={label} className="flex px-4 py-2 gap-4">
+                <span className="w-24 text-muted-foreground flex-shrink-0">{label}</span>
+                <span className="font-mono text-[12px] break-all">{value}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
 
       {/* Data directory */}

@@ -40,6 +40,11 @@ export interface ClusterCreateInput {
   provider?: string;
 }
 
+export interface RepoPathValidation {
+  ok: boolean;
+  message: string;
+}
+
 // ---------------------------------------------------------------------------
 // License
 // ---------------------------------------------------------------------------
@@ -179,6 +184,17 @@ export interface AppSettings {
   default_repo_path: string;
   default_aws_profile: string;
   default_aws_region: string;
+}
+
+export interface RepoSyncStatus {
+  enabled: boolean;
+  url: string;
+  branch: string;
+  local_path: string;
+  last_status: string;
+  last_message: string;
+  last_synced_at: string;
+  head: string;
 }
 
 // ---------------------------------------------------------------------------

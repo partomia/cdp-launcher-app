@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Camera,
   Trash2,
@@ -72,7 +72,7 @@ export function TemplatesPanel({ clusterId, clusterState }: Props) {
 
   const isReady = clusterState === "ready";
 
-  async function load() {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       setTemplates(await templateList(clusterId));
@@ -81,9 +81,9 @@ export function TemplatesPanel({ clusterId, clusterState }: Props) {
     } finally {
       setLoading(false);
     }
-  }
+  }, [clusterId]);
 
-  useEffect(() => { load(); }, [clusterId]);
+  useEffect(() => { load(); }, [load]);
 
   async function handleCapture() {
     if (!newLabel.trim()) return;

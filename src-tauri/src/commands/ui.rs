@@ -4,6 +4,7 @@ use std::sync::Arc;
 use tauri::State;
 
 use crate::error::AppError;
+use crate::git_sync::{repo_sync_status as load_repo_sync_status, sync_managed_repo, RepoSyncStatus};
 use crate::runner::{execute_command, CommandRun, RunnerState};
 use crate::state::{app_data_dir, Store};
 
@@ -23,6 +24,16 @@ pub fn settings_set(
     value: String,
 ) -> Result<(), AppError> {
     store.set_setting(&key, &value)
+}
+
+#[tauri::command]
+pub fn repo_sync_status(store: State<'_, Arc<Store>>) -> Result<RepoSyncStatus, AppError> {
+    load_repo_sync_status(&store)
+}
+
+#[tauri::command]
+pub fn repo_sync_now(store: State<'_, Arc<Store>>) -> Result<RepoSyncStatus, AppError> {
+    sync_managed_repo(&store)
 }
 
 // ---------------------------------------------------------------------------

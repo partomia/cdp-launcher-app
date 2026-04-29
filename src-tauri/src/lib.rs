@@ -1,5 +1,6 @@
 mod commands;
 mod error;
+mod git_sync;
 mod orchestrator;
 mod runner;
 mod state;
@@ -30,6 +31,15 @@ pub fn run() {
         Err(e) => tracing::error!("failed to mark stale phases: {e}"),
     }
 
+    match git_sync::sync_managed_repo(&store) {
+        Ok(status) => {
+            if status.enabled {
+                tracing::info!("managed repo sync status={} path={}", status.last_status, status.local_path);
+            }
+        }
+        Err(e) => tracing::error!("managed repo sync failed: {e}"),
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .manage(store)
@@ -49,6 +59,8 @@ pub fn run() {
             cluster::cluster_list,
             cluster::cluster_get,
             cluster::cluster_create,
+            cluster::cluster_validate_repo_path,
+            cluster::cluster_update_repo_path,
             cluster::cluster_delete_metadata,
             cluster::cluster_phase_events,
             // Install / destroy / scale orchestration
@@ -64,6 +76,8 @@ pub fn run() {
             // Settings + UI helpers
             ui::settings_get,
             ui::settings_set,
+            ui::repo_sync_status,
+            ui::repo_sync_now,
             ui::forget_all_secrets,
             ui::delete_all_clusters,
             ui::cluster_env_vars,

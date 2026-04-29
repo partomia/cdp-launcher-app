@@ -3,7 +3,17 @@ import { listen } from "@tauri-apps/api/event";
 import { Loader2, XCircle, CheckCircle, StopCircle, RotateCcw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { installCancel, installStart, destroyStart, scaleStart, clusterGet, clusterPhaseEvents } from "@/lib/tauri";
+import {
+  installCancel,
+  installStart,
+  destroyStart,
+  scaleStart,
+  clusterGet,
+  clusterPhaseEvents,
+  clusterValidateRepoPath,
+  clusterUpdateRepoPath,
+  settingsGet,
+} from "@/lib/tauri";
 import { PhaseTracker } from "@/components/PhaseTracker";
 import { LogPane } from "@/components/LogPane";
 import { ErrorHintBanner } from "@/components/ErrorHintBanner";
@@ -42,6 +52,107 @@ function elapsedSince(iso: string): string {
   const mins = Math.floor(secs / 60);
   const rem = secs % 60;
   return `${mins}m ${rem}s`;
+}
+
+function RepoPathRepair({
+  cluster,
+  onClusterChange,
+}: {
+  cluster: Cluster;
+  onClusterChange: (c: Cluster) => void;
+}) {
+  const [repoPath, setRepoPath] = useState(cluster.repo_path);
+  const [defaultRepoPath, setDefaultRepoPath] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
+
+  useEffect(() => {
+    setRepoPath(cluster.repo_path);
+  }, [cluster.repo_path]);
+
+  useEffect(() => {
+    settingsGet()
+      .then((settings) => setDefaultRepoPath(settings.default_repo_path ?? ""))
+      .catch(() => {});
+  }, []);
+
+  async function handleValidate() {
+    setBusy(true);
+    try {
+      const result = await clusterValidateRepoPath(repoPath.trim());
+      setMsg({ text: result.message, ok: result.ok });
+    } catch (e: unknown) {
+      setMsg({
+        text: e instanceof Error ? e.message : String(e),
+        ok: false,
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleSave() {
+    setBusy(true);
+    try {
+      const updated = await clusterUpdateRepoPath(cluster.id, repoPath.trim());
+      onClusterChange(updated);
+      setMsg({ text: "Installer repo path updated for this cluster.", ok: true });
+    } catch (e: unknown) {
+      setMsg({
+        text: e instanceof Error ? e.message : String(e),
+        ok: false,
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mx-4 mt-4 rounded-lg border border-amber-500/30 bg-amber-50/40 dark:bg-amber-950/10 p-4 space-y-3 flex-shrink-0">
+      <div className="space-y-1">
+        <h3 className="text-[13px] font-semibold">Installer repo path</h3>
+        <p className="text-[12px] text-muted-foreground">
+          This cluster uses the path saved at creation time. If it points to an old checkout,
+          fix it here, then resume the install.
+        </p>
+      </div>
+      <input
+        type="text"
+        value={repoPath}
+        onChange={(e) => setRepoPath(e.target.value)}
+        placeholder="/Users/you/IdeaProjects/CDP7.3.2-Installation/cdp-732-automation"
+        className="w-full rounded-md border border-border bg-background px-3 py-2 text-[13px] outline-none focus:ring-1 focus:ring-ring font-mono"
+      />
+      <div className="flex flex-wrap items-center gap-2">
+        <Button size="sm" variant="outline" onClick={handleValidate} disabled={busy}>
+          {busy ? "Checking…" : "Validate path"}
+        </Button>
+        <Button size="sm" onClick={handleSave} disabled={busy || !repoPath.trim()}>
+          {busy ? "Saving…" : "Save path"}
+        </Button>
+        {defaultRepoPath && defaultRepoPath !== repoPath && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setRepoPath(defaultRepoPath)}
+            disabled={busy}
+          >
+            Use saved default
+          </Button>
+        )}
+      </div>
+      {defaultRepoPath && (
+        <p className="text-[11px] text-muted-foreground font-mono break-all">
+          Default: {defaultRepoPath}
+        </p>
+      )}
+      {msg && (
+        <p className={cn("text-[12px]", msg.ok ? "text-green-600 dark:text-green-400" : "text-destructive")}>
+          {msg.text}
+        </p>
+      )}
+    </div>
+  );
 }
 
 export function InstallProgress({ cluster, onClusterChange }: Props) {
@@ -240,6 +351,10 @@ export function InstallProgress({ cluster, onClusterChange }: Props) {
             onDismiss={() => setActiveHint(null)}
           />
         </div>
+      )}
+
+      {cluster.state === "failed" && !isDestroyFailure && (
+        <RepoPathRepair cluster={cluster} onClusterChange={onClusterChange} />
       )}
 
       {/* Body: phase tracker + log pane */}

@@ -631,7 +631,7 @@ function SecuritySection({
   }
 
   // Called by SecurityLogPane when security-phase-done event arrives
-  function handlePhaseDone(_success: boolean, _err: string | null) {
+  function handlePhaseDone() {
     setActivePhase(null);  // stop spinner, re-enable buttons
     // logPhase stays set — log pane remains visible with final status for the user to read
   }

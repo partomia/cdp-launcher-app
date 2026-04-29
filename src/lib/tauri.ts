@@ -7,6 +7,8 @@ import type {
   LicenseInfo,
   LogLine,
   PhaseEvent,
+  RepoPathValidation,
+  RepoSyncStatus,
 } from "./types";
 
 async function call<T>(
@@ -67,6 +69,15 @@ export const clusterGet = (id: string): Promise<Cluster> =>
 export const clusterCreate = (input: ClusterCreateInput): Promise<Cluster> =>
   call("cluster_create", { input });
 
+export const clusterValidateRepoPath = (
+  path: string,
+): Promise<RepoPathValidation> => call("cluster_validate_repo_path", { path });
+
+export const clusterUpdateRepoPath = (
+  id: string,
+  repoPath: string,
+): Promise<Cluster> => call("cluster_update_repo_path", { id, repoPath });
+
 export const clusterDeleteMetadata = (id: string): Promise<void> =>
   call("cluster_delete_metadata", { id });
 
@@ -107,6 +118,10 @@ export const settingsGet = (): Promise<Record<string, string>> =>
   call("settings_get");
 export const settingsSet = (key: string, value: string): Promise<void> =>
   call("settings_set", { key, value });
+export const repoSyncStatus = (): Promise<RepoSyncStatus> =>
+  call("repo_sync_status");
+export const repoSyncNow = (): Promise<RepoSyncStatus> =>
+  call("repo_sync_now");
 
 // ---------------------------------------------------------------------------
 // Danger zone
@@ -255,4 +270,6 @@ export type {
   LicenseInfo,
   LogLine,
   PhaseEvent,
+  RepoPathValidation,
+  RepoSyncStatus,
 };
