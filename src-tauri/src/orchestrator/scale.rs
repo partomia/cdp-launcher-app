@@ -226,7 +226,7 @@ async fn run_scale_inner(ctx: ScaleCtx) -> Result<(), AppError> {
             // Write updated terraform.tfvars
             // ----------------------------------------------------------------
             ScalePhase::ScaleTfvars => {
-                match write_tfvars(&ctx.cluster_id, &ctx.repo_path, &tfvars_cfg) {
+                match write_tfvars(&ctx.cluster_id, &cluster.name, &ctx.repo_path, &tfvars_cfg) {
                     Ok(()) => {
                         let _ = ctx.app.emit(
                             "log-line",

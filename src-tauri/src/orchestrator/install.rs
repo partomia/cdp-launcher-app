@@ -236,7 +236,7 @@ async fn run_install_inner(ctx: InstallCtx) -> Result<(), AppError> {
             // Tfvars — write file, no subprocess
             // ----------------------------------------------------------------
             Phase::Tfvars => {
-                match write_tfvars(&ctx.cluster_id, &ctx.repo_path, &tfvars_cfg) {
+                match write_tfvars(&ctx.cluster_id, &cluster.name, &ctx.repo_path, &tfvars_cfg) {
                     Ok(()) => {
                         // Emit a synthetic log line so the UI shows activity
                         let _ = ctx.app.emit(
